@@ -1,0 +1,43 @@
+# Model hyperparametrləri (modul-modul)
+
+quality_check:
+  blur_threshold: 100.0
+  min_brightness: 40
+  max_brightness: 220
+
+document_detection:
+  model: "yolo-doc-detector"
+  confidence_threshold: 0.5
+
+document_classification:
+  model: "resnet50-doc-classifier"
+  num_classes: 12
+
+feature_extraction:
+  tampering_cnn:
+    model: "efficientnet-tamper-detect"
+    input_size: 512
+  ocr:
+    engine: "paddleocr"
+    lang: ["az", "en"]
+  security_elements:
+    model: "security-feature-classifier"
+  metadata:
+    check_exif: true
+    check_compression_history: true
+
+fusion_model:
+  type: "gradient_boosting"  # sklearn-vari fit/predict interfeysi
+  params:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+  output_classes: ["authentic", "suspicious", "forged"]
+
+explainability:
+  method: "grad_cam"
+  mask_output: true
+
+registry:
+  tracking_backend: "mlflow"   # və ya "dvc" / "wandb"
+  registry_path: "model_registry/"

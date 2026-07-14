@@ -1,0 +1,48 @@
+# Dataset path və mənbə konfiqurasiyası
+datasets:
+  midv2020:
+    path: data/raw/midv2020
+    license: academic-use-only
+    note: "Mock sənədlər, forged versiyalar yoxdur — sintetik generasiya tələb olunur"
+
+  sidtd:
+    path: data/raw/sidtd
+    license: check-before-use
+
+  fakeidet2_db:
+    path: data/raw/fakeidet2
+    license: request-required
+
+  cmid:
+    path: data/raw/cmid
+    license: check-before-use
+
+  doc_tamper:
+    path: data/raw/doc_tamper
+    license: check-before-use
+
+  casia_v2:
+    path: data/raw/casia_v2
+    license: check-before-use
+
+  cedar_signatures:
+    path: data/raw/cedar
+    license: check-before-use
+
+  production_data:
+    path: data/raw/production
+    enabled: false
+    note: "Yalnız razılıq alınmış, anonimləşdirilmiş data. Hüquq komandası ilə əlaqə tələb olunur."
+
+splits:
+  train: 0.70
+  validation: 0.15
+  test: 0.15
+  stratify_on:
+    - label
+    - document_type
+    - tamper_type
+    - source_country_or_template
+
+processed_output: data/processed
+interim_output: data/interim
