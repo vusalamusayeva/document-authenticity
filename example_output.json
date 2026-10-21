@@ -1,0 +1,47 @@
+{
+  "file_id": "doc_12345",
+  "image_width": 1200,
+  "image_height": 1600,
+  "candidates": [
+    {
+      "type": "signature",
+      "bbox": { "ymin": 1200, "xmin": 800, "ymax": 1400, "xmax": 1100 },
+      "confidence": 0.85,
+      "is_suspicious": false
+    },
+    {
+      "type": "stamp",
+      "bbox": { "ymin": 1150, "xmin": 200, "ymax": 1350, "xmax": 400 },
+      "confidence": 0.90,
+      "is_suspicious": false
+    }
+  ],
+  "signature_verifications": [
+    { 
+      "signature_index": 0,
+      "similarity_score": 0.92, 
+      "metrics": {
+        "ssim": 0.95,
+        "hu_moments": 0.90,
+        "contour_similarity": 0.91,
+        "orb_matching": 0.92,
+        "total_similarity": 0.92
+      },
+      "status": "match" 
+    }
+  ],
+  "stamp_analyses": [
+    { 
+      "detected": true,
+      "confidence": 0.90,
+      "analysis_details": "Dairəvilik: 0.88, Solidity: 0.92, Rəng: 0.95. Möhür normaldır.",
+      "circularity": 0.88, 
+      "solidity": 0.92
+    }
+  ],
+  "risk_score": 0.12,
+  "is_suspicious": false,
+  "visualization_path": "outputs/visualized_doc_12345.png",
+  "status": "success",
+  "errors": []
+}
