@@ -1,0 +1,35 @@
+# Inference pipeline konfiqurasiyası
+pipeline:
+  - step: preprocessing
+    module: doc_auth.preprocessing.quality_check
+    reject_on_low_quality: true
+
+  - step: document_detection
+    module: doc_auth.ingestion.document_detection
+
+  - step: document_classification
+    module: doc_auth.classification.document_classifier
+
+  - step: feature_extraction
+    parallel: true
+    modules:
+      - doc_auth.forensics.tampering_detection
+      - doc_auth.ocr.ocr_check
+      - doc_auth.signature_stamp.security_elements
+      - doc_auth.metadata.metadata_analysis
+
+  - step: fusion
+    module: doc_auth.fusion.decision_model
+    output: ["label", "confidence"]
+
+  - step: explainability
+    module: doc_auth.explainability.explain
+    output: "mask"
+
+logging:
+  level: INFO
+  save_intermediate_results: true
+
+api:
+  host: "0.0.0.0"
+  port: 8000
