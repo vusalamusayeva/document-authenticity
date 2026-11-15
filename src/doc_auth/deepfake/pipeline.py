@@ -1,13 +1,13 @@
 import logging
 from typing import Dict, Any
-from .schemas import DeepfakeConfig, DeepfakeAnalysisResult
-from .video_loader import VideoLoader
-from .frame_sampler import FrameSampler
-from .face_detector import FaceDetector
-from .visual_detector import VisualDetector
-from .temporal_analysis import TemporalAnalyzer
-from .audio_analysis import AudioAnalyzer
-from .risk_scoring import RiskScorer
+from src.doc_auth.deepfake.schemas import DeepfakeConfig, DeepfakeAnalysisResult
+from src.doc_auth.deepfake.video_loader import VideoLoader
+from src.doc_auth.deepfake.frame_sampler import FrameSampler
+from src.doc_auth.deepfake.face_detector import FaceDetector
+from src.doc_auth.deepfake.visual_detector import VisualDetector
+from src.doc_auth.deepfake.temporal_analysis import TemporalAnalyzer
+from src.doc_auth.deepfake.audio_analysis import AudioAnalyzer
+from src.doc_auth.deepfake.risk_scoring import RiskScorer
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +22,15 @@ class DeepfakePipeline:
         self.risk_scorer = RiskScorer()
 
     def run(self, video_path: str) -> DeepfakeAnalysisResult:
-
+        """
+        Videonun təhlükəsiz yüklənməsi, frame sampling, vizual/temporal/audio analizi 
+        və risk hesablanması prosesini idarə edir. Heç vaxt crash etmir.
+        """
         try:
+            # 1. Video metadata və təhlükəsizlik yoxlaması
             metadata = self.loader.load_and_validate(video_path)
 
+            # 2. Frame-lərin sampling edilməsi və analizi
             frame_analyses = []
             max_visual_score = 0.0
 
@@ -42,10 +47,13 @@ class DeepfakePipeline:
                     "bounding_boxes": [f["bbox"] for f in visual_res["faces"]]
                 })
 
+            # 3. Temporal uyğunsuzluq analizi
             temporal_score = self.temporal_analyzer.compute_temporal_score(frame_analyses)
 
+            # 4. Audio analizi
             audio_result = self.audio_analyzer.analyze_audio(metadata)
 
+            # 5. Risk skorunun hesablanması
             risk_result = self.risk_scorer.compute_risk(max_visual_score, temporal_score, audio_result)
 
             return DeepfakeAnalysisResult(
@@ -65,4 +73,5 @@ class DeepfakePipeline:
                 error_message=str(e)
             )
         finally:
+            # Müvəqqəti faylların təmizlənməsi
             self.sampler.cleanup()
