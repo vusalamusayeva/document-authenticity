@@ -1,7 +1,7 @@
 import pytest
+from doc_auth.deepfake.face_detector import FaceDetector
+from doc_auth.deepfake.exceptions import ModelUnavailableError
 import numpy as np
-from src.doc_auth.deepfake.face_detector import FaceDetector
-from src.doc_auth.deepfake.exceptions import ModelUnavailableError
 
 def test_face_detector_missing_weights():
     detector = FaceDetector(model_path="non_existent_weights.pth")

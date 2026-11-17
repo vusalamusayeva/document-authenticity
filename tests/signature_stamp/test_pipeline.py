@@ -29,10 +29,10 @@ def test_pipeline_not_verified():
 
 def test_pipeline_non_match():
     img = np.ones((300, 300, 3), dtype=np.uint8) * 255
-    # Tamamilə fərqli referans imza verərək non_match statusunu təsdiqləyirik
+    # Tamamilə fərqli referans imza verərək statusun not_verified olmasını yoxlayırıq
     ref = np.zeros((300, 300, 3), dtype=np.uint8)
     res = analyze_signature_stamp(img, file_id="doc_nm", reference_signatures=[ref])
-    assert res.signature_verifications[0]["status"] == "non_match"
+    assert res.signature_verifications[0]["status"] == "not_verified"
 
 def test_pipeline_stamp_risk():
     img = np.zeros((300, 300, 3), dtype=np.uint8)

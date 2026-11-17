@@ -1,13 +1,13 @@
 import logging
 from typing import Dict, Any
-from src.doc_auth.deepfake.schemas import DeepfakeConfig, DeepfakeAnalysisResult
-from src.doc_auth.deepfake.video_loader import VideoLoader
-from src.doc_auth.deepfake.frame_sampler import FrameSampler
-from src.doc_auth.deepfake.face_detector import FaceDetector
-from src.doc_auth.deepfake.visual_detector import VisualDetector
-from src.doc_auth.deepfake.temporal_analysis import TemporalAnalyzer
-from src.doc_auth.deepfake.audio_analysis import AudioAnalyzer
-from src.doc_auth.deepfake.risk_scoring import RiskScorer
+from doc_auth.schemas.pipeline_schemas import DeepfakeConfig, DeepfakeAnalysisResult
+from doc_auth.deepfake.video_loader import VideoLoader
+from doc_auth.deepfake.frame_sampler import FrameSampler
+from doc_auth.deepfake.face_detector import FaceDetector
+from doc_auth.deepfake.visual_detector import VisualDetector
+from doc_auth.deepfake.temporal_analysis import TemporalAnalyzer
+from doc_auth.deepfake.audio_analysis import AudioAnalyzer
+from doc_auth.deepfake.risk_scoring import RiskScorer
 
 logger = logging.getLogger(__name__)
 
