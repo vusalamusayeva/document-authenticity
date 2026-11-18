@@ -1,40 +1,36 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-import shutil
-import tempfile
-import os
-from src.doc_auth.deepfake.pipeline import DeepfakePipeline
-from src.doc_auth.deepfake.schemas import DeepfakeConfig, DeepfakeAnalysisResult
+from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from doc_auth.deepfake.pipeline import analyze_video_deepfake
 
-app = FastAPI(
-    title="Deepfake Video Analysis Engine API",
-    description="Sənəd və video forensika üçün deepfake aşkarlama xidməti",
-    version="1.0.0"
-)
+router = APIRouter(prefix="/api/v1/deepfake", tags=["Deepfake Analysis"])
 
-pipeline = DeepfakePipeline()
+MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
 
-@app.post("/api/v1/deepfake/analyze", response_model=DeepfakeAnalysisResult)
-async def analyze_video_endpoint(file: UploadFile = File(...)):
+@router.post("/analyze")
+async def analyze_endpoint(file: UploadFile = File(...)):
     """
-    Yüklənən video faylını qəbul edir, müvəqqəti saxlamaqla DeepfakePipeline üzərindən 
-    analiz edir və nəticəni (risk skorları, temporal uyğunsuzluq, audio statusu) qaytarır.
+    Video faylını qəbul edir, ölçü limitini yoxlayır və deepfake analizi icra edir.
+    Daxili filesystem yolları response-a çıxarılmır.
     """
-    if not file.filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm')):
-        raise HTTPException(status_code=400, detail="Dəstəklənməyən video formatı.")
+    # Fayl ölçüsü yoxlaması
+    contents = await file.read()
+    if len(contents) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Fayl ölçüsü icazə verilən 500MB limitini keçir."
+        )
 
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1])
     try:
-        shutil.copyfileobj(file.file, temp_file)
-        temp_file.close()
-
-        result = pipeline.run(temp_file.name)
+        result = analyze_video_deepfake(contents)
+        if result.get("status") == "failed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "Analiz zamanı xəta baş verdi.")
+            )
         return result
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analiz zamanı xəta baş verdi: {str(e)}")
-    finally:
-        if os.path.exists(temp_file.name):
-            try:
-                os.remove(temp_file.name)
-            except Exception:
-                pass
+    except HTTPException as he:
+        raise he
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Gözlənilməz daxili xəta baş verdi."
+        )

@@ -1,37 +1,44 @@
-from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Any
+from typing import Optional, List, Dict, Any, Literal
+from pydantic import BaseModel, Field, field_validator
+
+AnalysisStatus = Literal["success", "partial", "failed", "model_unavailable"]
 
 class DeepfakeConfig(BaseModel):
-    max_file_size_mb: int = Field(default=100)
-    max_duration_sec: float = Field(default=60.0)
-    max_resolution: tuple = Field(default=(1920, 1080))
-    max_frames: int = Field(default=300)
-    sampling_rate_fps: float = Field(default=2.0)
+    max_file_size_mb: int = 500
+    max_duration_sec: int = 300
+    allowed_formats: List[str] = [".mp4", ".mov", ".avi", ".webm"]
+    sample_rate: int = 5
+    max_frames: int = 20
+    weights: Dict[str, float] = {"visual": 0.6, "temporal": 0.3, "audio": 0.1}
 
 class VideoMetadata(BaseModel):
-    filename: str
-    format: str
-    duration_sec: float
+    duration: float
+    size_mb: float
     width: int
     height: int
-    fps: float
-    total_frames: int
-    has_audio: bool
-    audio_duration_sec: Optional[float] = None
+    format: str
 
-class FrameAnalysisResult(BaseModel):
-    frame_index: int
-    timestamp_ms: float
-    face_detected: bool
-    deepfake_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    bounding_boxes: List[List[float]] = []
+class BaseAnalysisResult(BaseModel):
+    status: AnalysisStatus = "success"
+    message: Optional[str] = None
 
-class DeepfakeAnalysisResult(BaseModel):
-    status: str = Field(default="success", description="success, partial, failed, model_unavailable")
-    metadata: Optional[VideoMetadata] = None
-    frames_analyzed: int = 0
-    temporal_inconsistency_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    audio_status: Dict[str, Any] = {}
+class DeepfakeAnalysisResult(BaseAnalysisResult):
+    is_deepfake: Optional[bool] = None
+    risk_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    model_name: Optional[str] = None
+    model_version: Optional[str] = None
+    metadata: Dict[Any, Any] = Field(default_factory=dict)
+
+    @field_validator('risk_score', 'confidence', mode='before')
+    def py_score_validator(cls, v):
+        if v is not None and (v < 0.0 or v > 1.0):
+            return None
+        return v
+
+class DocumentAnalysisResponse(BaseAnalysisResult):
+    file_id: Optional[str] = None
+    deepfake_result: Optional[DeepfakeAnalysisResult] = None
+    signature_stamp_result: Optional[Dict[str, Any]] = None
+    final_decision: Optional[str] = None
     overall_risk_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    is_suspicious: bool = False
-    error_message: Optional[str] = None

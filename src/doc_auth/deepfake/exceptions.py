@@ -1,15 +1,15 @@
 class DocAuthError(Exception):
-    """Baza sənəd autentifikasiya xətası."""
+    """Baza xəta sinfi."""
     pass
 
 class VideoLoadError(DocAuthError):
-    """Video yüklənərkən və ya oxunarkən baş verən xəta."""
-    pass
-
-class SamplingLimitError(DocAuthError):
-    """Frame limitləri aşdıqda baş verən xəta."""
+    """Video yüklənərkən və ya oxunarkən baş verən xətalar."""
     pass
 
 class ModelUnavailableError(DocAuthError):
-    """Model çeki (checkpoint) və ya ağırlıqları tapılmadıqda baş verən xəta."""
+    """Model mövcud olmadıqda və ya yüklənmədikdə."""
+    pass
+
+class InvalidConfigError(DocAuthError):
+    """Yanlış və ya etibarsız konfiqurasiya daxil edildikdə."""
     pass

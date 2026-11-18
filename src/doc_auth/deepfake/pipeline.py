@@ -1,77 +1,97 @@
-import logging
-from typing import Dict, Any
-from doc_auth.schemas.pipeline_schemas import DeepfakeConfig, DeepfakeAnalysisResult
-from doc_auth.deepfake.video_loader import VideoLoader
-from doc_auth.deepfake.frame_sampler import FrameSampler
-from doc_auth.deepfake.face_detector import FaceDetector
-from doc_auth.deepfake.visual_detector import VisualDetector
-from doc_auth.deepfake.temporal_analysis import TemporalAnalyzer
-from doc_auth.deepfake.audio_analysis import AudioAnalyzer
-from doc_auth.deepfake.risk_scoring import RiskScorer
+import os
+import tempfile
+from typing import Dict, Any, Optional
+from doc_auth.deepfake.video_loader import validate_video_metadata
+from doc_auth.deepfake.frame_sampler import sample_frames
+from doc_auth.deepfake.face_detector import detect_faces
+from doc_auth.deepfake.visual_detector import analyze_visual_artifacts
+from doc_auth.deepfake.temporal_analysis import analyze_temporal
+from doc_auth.deepfake.audio_analysis import analyze_audio
+from doc_auth.deepfake.risk_scoring import calculate_risk_score
+from doc_auth.deepfake.exceptions import DocAuthError
 
-logger = logging.getLogger(__name__)
+def analyze_video_deepfake(video_bytes: bytes, config: Optional[Dict[str, Any]] = None, model_checkpoint: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Video bayitlərini qəbul edir, müvəqqəti fayla yazır, bütün mərhələləri (loader, 
+    sampler, face detection, visual, temporal, audio, risk scoring) birləşdirir 
+    və finally blokunda müvəqqəti faylı təmizləyir.
+    """
+    config = config or {}
+    temp_file_path = None
 
-class DeepfakePipeline:
-    def __init__(self, config: DeepfakeConfig = None):
-        self.config = config or DeepfakeConfig()
-        self.loader = VideoLoader(self.config)
-        self.sampler = FrameSampler(self.config)
-        self.detector = VisualDetector()
-        self.temporal_analyzer = TemporalAnalyzer()
-        self.audio_analyzer = AudioAnalyzer()
-        self.risk_scorer = RiskScorer()
+    try:
+        # Müvəqqəti faylın yaradılması
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            tmp.write(video_bytes)
+            temp_file_path = tmp.name
 
-    def run(self, video_path: str) -> DeepfakeAnalysisResult:
-        """
-        Videonun təhlükəsiz yüklənməsi, frame sampling, vizual/temporal/audio analizi 
-        və risk hesablanması prosesini idarə edir. Heç vaxt crash etmir.
-        """
-        try:
-            # 1. Video metadata və təhlükəsizlik yoxlaması
-            metadata = self.loader.load_and_validate(video_path)
+        # 1. Video metadata və loader yoxlaması
+        metadata = validate_video_metadata(temp_file_path, config)
 
-            # 2. Frame-lərin sampling edilməsi və analizi
-            frame_analyses = []
-            max_visual_score = 0.0
+        # 2. Frame sampling
+        sample_rate = config.get("sample_rate", 5)
+        max_frames = config.get("max_frames", 20)
+        
+        frames_predictions = []
+        frame_iter = sample_frames(temp_file_path, sample_rate=sample_rate, max_frames=max_frames)
 
-            for sampled in self.sampler.sample_frames(video_path):
-                frame = sampled["frame"]
-                visual_res = self.detector.analyze_frame(frame)
-                
-                max_visual_score = max(max_visual_score, visual_res["max_deepfake_score"])
-                frame_analyses.append({
-                    "frame_index": sampled["frame_index"],
-                    "timestamp_ms": sampled["timestamp_ms"],
-                    "face_detected": visual_res["face_detected"],
-                    "max_deepfake_score": visual_res["max_deepfake_score"],
-                    "bounding_boxes": [f["bbox"] for f in visual_res["faces"]]
+        for item in frame_iter:
+            frame = item["frame"]
+            # 3. Face detection
+            faces = detect_faces(frame)
+            for face in faces:
+                # 4. Visual analysis
+                visual_res = analyze_visual_artifacts(face["crop"], model_checkpoint=model_checkpoint)
+                frames_predictions.append({
+                    "frame_index": item["frame_index"],
+                    "timestamp_ms": item["timestamp_ms"],
+                    "score": visual_res.get("score"),
+                    "is_deepfake": visual_res.get("is_deepfake")
                 })
 
-            # 3. Temporal uyğunsuzluq analizi
-            temporal_score = self.temporal_analyzer.compute_temporal_score(frame_analyses)
+        # 5. Temporal analysis
+        temporal_res = analyze_temporal(frames_predictions)
 
-            # 4. Audio analizi
-            audio_result = self.audio_analyzer.analyze_audio(metadata)
+        # 6. Audio analysis
+        audio_res = analyze_audio(temp_file_path)
 
-            # 5. Risk skorunun hesablanması
-            risk_result = self.risk_scorer.compute_risk(max_visual_score, temporal_score, audio_result)
+        # Analiz nəticələrinin yığılması
+        analyses = {
+            "visual": {"status": "success", "score": frames_predictions[-1]["score"] if frames_predictions else 0.0},
+            "temporal": temporal_res,
+            "audio": audio_res
+        }
 
-            return DeepfakeAnalysisResult(
-                status="success",
-                metadata=metadata,
-                frames_analyzed=len(frame_analyses),
-                temporal_inconsistency_score=temporal_score,
-                audio_status=audio_result,
-                overall_risk_score=risk_result["overall_risk_score"],
-                is_suspicious=risk_result["is_suspicious"]
-            )
+        # 7. Risk scoring
+        risk_result = calculate_risk_score(analyses, config.get("weights"))
 
-        except Exception as e:
-            logger.error(f"Deepfake pipeline xətası: {str(e)}")
-            return DeepfakeAnalysisResult(
-                status="failed",
-                error_message=str(e)
-            )
-        finally:
-            # Müvəqqəti faylların təmizlənməsi
-            self.sampler.cleanup()
+        return {
+            "status": "success",
+            "metadata": metadata,
+            "deepfake_result": {
+                "is_deepfake": risk_result.get("decision") == "fake",
+                "risk_score": risk_result.get("risk_score"),
+                "decision": risk_result.get("decision"),
+                "frames_analyzed": len(frames_predictions)
+            }
+        }
+
+    except DocAuthError as e:
+        return {
+            "status": "failed",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error_type": "InternalError",
+            "message": "Daxili sistem xətası baş verdi."
+        }
+    finally:
+        # Müvəqqəti faylın həmişə təmizlənməsi (cleanup)
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass  # Cleanup xətası əsas nəticəni əvəz etmir

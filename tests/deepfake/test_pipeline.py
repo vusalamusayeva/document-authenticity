@@ -1,15 +1,17 @@
 import pytest
-from src.doc_auth.deepfake.pipeline import DeepfakePipeline
-from src.doc_auth.deepfake.schemas import DeepfakeConfig
+import os
+import numpy as np
+from doc_auth.deepfake.pipeline import analyze_video_deepfake
+from doc_auth.deepfake.risk_scoring import calculate_risk_score
+from doc_auth.deepfake.exceptions import InvalidConfigError
 
-def test_pipeline_non_existent_video():
-    pipeline = DeepfakePipeline()
-    result = pipeline.run("non_existent_video_path_12345.mp4")
-    assert result.status == "failed"
-    assert result.error_message is not None
+def test_risk_scoring_validation():
+    """Çəkilərin cəminin mənfi və ya sıfır olmasını yoxlayır."""
+    with pytest.raises(InvalidConfigError):
+        calculate_risk_score({"visual": {"status": "success", "score": 0.5}}, {"visual": 0.0})
 
-def test_pipeline_config_limits():
-    config = DeepfakeConfig(max_file_size_mb=1, max_duration_sec=5.0)
-    pipeline = DeepfakePipeline(config)
-    assert pipeline.config.max_file_size_mb == 1
-    assert pipeline.config.max_duration_sec == 5.0
+def test_pipeline_with_invalid_bytes():
+    """Etibarsız və ya boş video bayitləri ilə pipeline-ın xəta qaytarmasını yoxlayır."""
+    result = analyze_video_deepfake(b"fake_video_bytes_content")
+    assert result["status"] == "failed"
+    assert "error_type" in result
