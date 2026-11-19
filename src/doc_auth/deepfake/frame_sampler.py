@@ -1,43 +1,102 @@
-import cv2
-import numpy as np
-from typing import List, Dict, Any, Generator
-from doc_auth.deepfake.exceptions import VideoLoadError
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional
 
-def sample_frames(video_path: str, sample_rate: int = 1, max_frames: int = 100) -> Generator[Dict[str, Any], None, None]:
-    if sample_rate <= 0:
-        raise ValueError("Sampling rate 0-dan böyük olmalıdır.")
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise VideoLoadError(f"Video decoder açılmadı: {video_path}")
+import numpy as np
+
+from doc_auth.deepfake.exceptions import InvalidConfigError, VideoValidationError
+from doc_auth.deepfake.video_loader import VideoStreamReader, VideoValidationConfig
+
+
+@dataclass(frozen=True)
+class FrameSamplingConfig:
+    sampling_fps: float = 2.0
+    max_frames: int = 32
+
+    def __post_init__(self) -> None:
+        if isinstance(self.sampling_fps, bool) or not isinstance(self.sampling_fps, (int, float)):
+            raise InvalidConfigError("sampling_fps rəqəm olmalıdır.")
+        if float(self.sampling_fps) <= 0.0:
+            raise InvalidConfigError(
+                f"sampling_fps müsbət olmalıdır (sıfır və ya mənfi olmaz): {self.sampling_fps}"
+            )
+
+        if isinstance(self.max_frames, bool) or not isinstance(self.max_frames, int):
+            raise InvalidConfigError("max_frames tam ədəd olmalıdır.")
+        if self.max_frames <= 0:
+            raise InvalidConfigError(f"max_frames müsbət tam ədəd olmalıdır: {self.max_frames}")
+
+
+def sample_video_frames(
+    video_path: str | Path,
+    sampling_config: Optional[FrameSamplingConfig] = None,
+    validation_config: Optional[VideoValidationConfig] = None,
+) -> Iterator[Dict[str, object]]:
+    s_cfg = sampling_config or FrameSamplingConfig()
+    v_cfg = validation_config or VideoValidationConfig()
+
+    step_interval_sec = 1.0 / float(s_cfg.sampling_fps)
+    next_target_ts = 0.0
+    yielded = 0
+    raw_idx = 0
+
     try:
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0:
-            fps = 25.0
-        frame_count = 0
-        extracted_count = 0
-        while cap.isOpened() and extracted_count < max_frames:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if frame_count % sample_rate == 0:
-                timestamp_ms = int((frame_count / fps) * 1000)
-                yield {
-                    "frame_index": frame_count,
-                    "timestamp_ms": timestamp_ms,
-                    "frame": frame
-                }
-                extracted_count += 1
-            frame_count += 1
-    finally:
-        cap.release()
+        with VideoStreamReader(video_path, v_cfg) as reader:
+            assert reader.cap is not None
+            meta = reader.metadata or {}
+            native_fps = meta.get("fps") or reader.cap.get(5)
+            if not native_fps or native_fps <= 0:
+                native_fps = 25.0
+
+            while yielded < s_cfg.max_frames:
+                ok, frame = reader.cap.read()
+                if not ok or frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
+                    break
+
+                pos_msec = reader.cap.get(0)
+                if pos_msec and pos_msec > 0:
+                    timestamp = float(pos_msec) / 1000.0
+                else:
+                    timestamp = float(raw_idx) / float(native_fps)
+
+                if timestamp + 1e-6 >= next_target_ts:
+                    yield {
+                        "frame_index": raw_idx,
+                        "sample_index": yielded,
+                        "timestamp": timestamp,
+                        "frame": frame,
+                    }
+                    yielded += 1
+                    next_target_ts = timestamp + step_interval_sec
+
+                raw_idx += 1
+    except VideoValidationError:
+        raise
+    except InvalidConfigError:
+        raise
+    except Exception as exc:
+        raise VideoValidationError(f"Frame çıxarılması zamanı xəta baş verdi: {exc}") from exc
+
 
 class FrameSampler:
-    def __init__(self, sample_rate: int = 1, max_frames: int = 100):
-        self.sample_rate = sample_rate
-        self.max_frames = max_frames
+    def __init__(
+        self,
+        sampling_fps: float = 2.0,
+        max_frames: int = 32,
+        validation_config: Optional[VideoValidationConfig] = None,
+    ) -> None:
+        self.config = FrameSamplingConfig(sampling_fps=sampling_fps, max_frames=max_frames)
+        self.validation_config = validation_config or VideoValidationConfig()
 
-    def sample_frames(self, video_path: str) -> Generator[Dict[str, Any], None, None]:
-        return sample_frames(video_path, self.sample_rate, self.max_frames)
+    def sample_frames(self, video_path: str | Path) -> Iterator[Dict[str, object]]:
+        return sample_video_frames(
+            video_path=video_path,
+            sampling_config=self.config,
+            validation_config=self.validation_config,
+        )
 
-    def sample(self, video_path: str) -> List[Dict[str, Any]]:
-        return list(sample_frames(video_path, self.sample_rate, self.max_frames))
+    def sample(self, video_path: str | Path) -> List[Dict[str, object]]:
+        return list(self.sample_frames(video_path))
+
+    def __call__(self, video_path: str | Path) -> Iterator[Dict[str, object]]:
+        return self.sample_frames(video_path)

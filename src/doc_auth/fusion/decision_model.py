@@ -1,41 +1,74 @@
-"""
-Fusion / Decision Model
-- hər modulun (ELA/CNN, OCR, security-element, metadata) skorlarını birləşdirir
-- çıxış: authentic / suspicious / forged + confidence balı
-"""
-
-from typing import Any
-
-from doc_auth.utils.base_model import BaseDocModel
-
-LABELS = ["authentic", "suspicious", "forged"]
+from typing import Any, Dict, Optional
 
 
-class FusionDecisionModel(BaseDocModel):
+class DecisionModel:
     """
-    sklearn-vari fit/predict interfeysinə uyğun fusion modeli.
-    Konkret alqoritm (məs. GradientBoosting) configs/model.yaml-dan oxunur.
+    Ingestion, metadata, OCR, classification və forensics siqnallarını birləşdirərək
+    yekun sənəd autentifikasiya qərarı və risk balı çıxarır.
     """
 
-    def __init__(self, params: dict | None = None):
-        self.params = params or {}
-        self._model = None  # underlying estimator burada saxlanılır
+    def __init__(self, suspicious_threshold: float = 0.6) -> None:
+        if not (0.0 <= suspicious_threshold <= 1.0):
+            raise ValueError("suspicious_threshold [0.0, 1.0] aralığında olmalıdır.")
+        self.suspicious_threshold = suspicious_threshold
 
-    def fit(self, X: Any, y: Any = None, **kwargs) -> "FusionDecisionModel":
-        raise NotImplementedError(
-            "Alt modüllərin (ELA, OCR, security, metadata) skorlarını "
-            "feature vektoruna çevirib estimator-u öyrədin."
-        )
+    def decide(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        data = signals or {}
+        forensics = data.get("forensics") if isinstance(data.get("forensics"), dict) else {}
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        ocr = data.get("ocr") if isinstance(data.get("ocr"), dict) else {}
 
-    def predict(self, X: Any) -> Any:
-        raise NotImplementedError
+        risk_points = 0.0
+        weight_sum = 0.0
 
-    def predict_proba(self, X: Any) -> Any:
-        raise NotImplementedError
+        tampering_score = forensics.get("tampering_score")
+        if isinstance(tampering_score, (int, float)) and not isinstance(tampering_score, bool):
+            risk_points += 0.6 * float(tampering_score)
+            weight_sum += 0.6
+        elif forensics.get("tampered") is True:
+            risk_points += 0.6
+            weight_sum += 0.6
 
-    def save(self, path: str) -> None:
-        raise NotImplementedError
+        if metadata.get("suspicious") is True:
+            risk_points += 0.2
+            weight_sum += 0.2
+        elif metadata.get("status") == "success":
+            weight_sum += 0.2
 
-    @classmethod
-    def load(cls, path: str) -> "FusionDecisionModel":
-        raise NotImplementedError
+        if ocr.get("suspicious") is True:
+            risk_points += 0.2
+            weight_sum += 0.2
+        elif ocr.get("status") == "success":
+            weight_sum += 0.2
+
+        if weight_sum <= 0.0:
+            return {
+                "status": "inconclusive",
+                "is_authentic": None,
+                "is_suspicious": None,
+                "risk_score": None,
+                "reason": "Qərar vermək üçün kifayət qədər etibarlı siqnal yoxdur.",
+            }
+
+        risk_score = round(max(0.0, min(1.0, risk_points / weight_sum)), 4)
+        is_suspicious = bool(risk_score >= self.suspicious_threshold)
+
+        return {
+            "status": "success",
+            "is_authentic": not is_suspicious,
+            "is_suspicious": is_suspicious,
+            "risk_score": risk_score,
+            "threshold": self.suspicious_threshold,
+        }
+
+    def fuse(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.decide(signals)
+
+    def predict(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.decide(signals)
+
+    def analyze(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.decide(signals)
+
+    def __call__(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.decide(signals)

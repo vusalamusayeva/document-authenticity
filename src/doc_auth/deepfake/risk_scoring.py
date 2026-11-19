@@ -1,67 +1,171 @@
-from typing import Dict, Any, Optional
+import math
+from typing import Any, Dict, Optional
+
 from doc_auth.deepfake.exceptions import InvalidConfigError
 
-def calculate_risk_score(analyses: Dict[str, Any], weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-    weights = weights or {"visual": 0.6, "temporal": 0.3, "audio": 0.1}
-    total_weight = sum(weights.values())
-    if total_weight <= 0:
-        raise InvalidConfigError("Risk çəkilərinin cəmi 0-dan böyük olmalıdır.")
-    evaluated_scores = []
-    active_weights = []
 
-    visual_res = analyses.get("visual", {})
-    if visual_res.get("status") == "success" and visual_res.get("score") is not None:
-        evaluated_scores.append(visual_res["score"] * weights.get("visual", 0.0))
-        active_weights.append(weights.get("visual", 0.0))
+def validate_score_value(value: Any, name: str = "score") -> float:
+    """Skor dəyərinin `[0.0, 1.0]` aralığında etibarlı rəqəm olduğunu yoxlayır."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidConfigError(f"{name} rəqəm olmalıdır, alındı: {type(value).__name__}")
+    score = float(value)
+    if math.isnan(score) or math.isinf(score) or not (0.0 <= score <= 1.0):
+        raise InvalidConfigError(f"{name} [0.0, 1.0] aralığında olmalıdır, alındı: {value}")
+    return score
 
-    temporal_res = analyses.get("temporal", {})
-    if temporal_res.get("status") == "success" and temporal_res.get("temporal_risk") is not None:
-        evaluated_scores.append(temporal_res["temporal_risk"] * weights.get("temporal", 0.0))
-        active_weights.append(weights.get("temporal", 0.0))
 
-    audio_res = analyses.get("audio", {})
-    if audio_res.get("status") == "success" and audio_res.get("lip_sync_score") is not None:
-        evaluated_scores.append(audio_res["lip_sync_score"] * weights.get("audio", 0.0))
-        active_weights.append(weights.get("audio", 0.0))
+def _validate_weight(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidConfigError(f"{name} rəqəm olmalıdır, alındı: {type(value).__name__}")
+    w = float(value)
+    if math.isnan(w) or math.isinf(w) or w < 0.0:
+        raise InvalidConfigError(f"{name} mənfi olmamalıdır, alındı: {value}")
+    return w
 
-    if not evaluated_scores or sum(active_weights) <= 0:
+
+class DeepfakeRiskScorer:
+    """
+    Visual, temporal və audio/lip-sync siqnallarından yekun deepfake risk balı və
+    qərarı hesablayır. Siqnallar natamam olduqda false positive/negative əvəzinə
+    `inconclusive` qaytarır.
+    """
+
+    def __init__(
+        self,
+        visual_weight: float = 0.65,
+        temporal_weight: float = 0.20,
+        audio_weight: float = 0.15,
+        suspicious_threshold: float = 0.50,
+    ) -> None:
+        vw = _validate_weight(visual_weight, "visual_weight")
+        tw = _validate_weight(temporal_weight, "temporal_weight")
+        aw = _validate_weight(audio_weight, "audio_weight")
+        total_w = vw + tw + aw
+        if total_w <= 0.0:
+            raise InvalidConfigError("Çəkilərin cəmi müsbət olmalıdır.")
+        validate_score_value(suspicious_threshold, name="suspicious_threshold")
+
+        self.visual_weight = vw
+        self.temporal_weight = tw
+        self.audio_weight = aw
+        self.suspicious_threshold = float(suspicious_threshold)
+
+    def score(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        data = signals or {}
+        visual = data.get("visual") if isinstance(data.get("visual"), dict) else {}
+        temporal = data.get("temporal") if isinstance(data.get("temporal"), dict) else {}
+        audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
+
+        weighted_sum = 0.0
+        active_weight = 0.0
+        used_signals = []
+
+        v_score = visual.get("score")
+        if visual.get("status") == "success" and v_score is not None:
+            validated_v = validate_score_value(v_score, name="visual_score")
+            weighted_sum += self.visual_weight * validated_v
+            active_weight += self.visual_weight
+            used_signals.append("visual")
+
+        t_score = temporal.get("temporal_score")
+        if t_score is None:
+            t_score = temporal.get("temporal_risk")
+        if temporal.get("status") == "success" and t_score is not None:
+            validated_t = validate_score_value(t_score, name="temporal_score")
+            weighted_sum += self.temporal_weight * validated_t
+            active_weight += self.temporal_weight
+            used_signals.append("temporal")
+
+        a_score = audio.get("lip_sync_score")
+        if audio.get("status") == "success" and a_score is not None:
+            validated_a = validate_score_value(a_score, name="lip_sync_score")
+            weighted_sum += self.audio_weight * validated_a
+            active_weight += self.audio_weight
+            used_signals.append("audio")
+
+        if active_weight <= 0.0 or "visual" not in used_signals:
+            return {
+                "status": "inconclusive",
+                "decision": "inconclusive",
+                "risk_score": None,
+                "overall_risk_score": None,
+                "is_suspicious": None,
+                "used_signals": used_signals,
+            }
+
+        risk_score = round(min(1.0, max(0.0, weighted_sum / active_weight)), 4)
+        is_suspicious = bool(risk_score >= self.suspicious_threshold)
+
         return {
-            "risk_score": None,
-            "overall_risk_score": None,
-            "is_suspicious": False,
-            "decision": "inconclusive",
-            "message": "Kibernetik analizlər üçün kifayət qədər qiymətləndirilmiş məlumat yoxdur."
+            "status": "success",
+            "decision": "suspicious" if is_suspicious else "low_risk",
+            "risk_score": risk_score,
+            "overall_risk_score": risk_score,
+            "is_suspicious": is_suspicious,
+            "threshold": self.suspicious_threshold,
+            "used_signals": used_signals,
         }
 
-    normalized_weight_sum = sum(active_weights)
-    risk_score = sum(evaluated_scores) / normalized_weight_sum
-    risk_score = float(max(0.0, min(1.0, risk_score)))
-    decision = "fake" if risk_score >= 0.5 else "real"
-    is_suspicious = risk_score >= 0.5  # Testin gözlədiyi is_suspicious bayrağı
+    def compute_risk(
+        self,
+        max_visual_score: Optional[float] = None,
+        temporal_score: Optional[float] = None,
+        audio_analysis: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        visual_payload: Dict[str, Any] = (
+            {"status": "success", "score": max_visual_score}
+            if max_visual_score is not None
+            else {"status": "unavailable", "score": None}
+        )
+        temporal_payload: Dict[str, Any] = (
+            {"status": "success", "temporal_score": temporal_score}
+            if temporal_score is not None
+            else {"status": "unavailable", "temporal_score": None}
+        )
 
-    return {
-        "risk_score": risk_score,
-        "overall_risk_score": risk_score,
-        "is_suspicious": is_suspicious,
-        "decision": decision,
-        "status": "success"
-    }
+        audio_payload: Dict[str, Any] = {"status": "unavailable", "lip_sync_score": None}
+        if isinstance(audio_analysis, dict):
+            if "lip_sync_score" in audio_analysis and audio_analysis["lip_sync_score"] is not None:
+                audio_payload = {"status": "success", "lip_sync_score": audio_analysis["lip_sync_score"]}
+            elif audio_analysis.get("has_audio") is True:
+                status_val = str(audio_analysis.get("audio_status", "")).lower()
+                inferred_score = 0.5 if status_val in {"suspicious", "mismatch", "anomalous"} else 0.1
+                audio_payload = {"status": "success", "lip_sync_score": inferred_score}
 
-class RiskScorer:
-    def __init__(self, visual_weight: float = 0.6, temporal_weight: float = 0.3, audio_weight: float = 0.1, **kwargs):
-        self.weights = {
-            "visual": visual_weight,
-            "temporal": temporal_weight,
-            "audio": audio_weight
-        }
+        return self.score({
+            "visual": visual_payload,
+            "temporal": temporal_payload,
+            "audio": audio_payload,
+        })
 
-    def compute_risk(self, max_visual_score: float = 0.0, temporal_score: float = 0.0, audio_analysis: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
-        analyses = {
-            "visual": {"status": "success", "score": max_visual_score},
-            "temporal": {"status": "success", "temporal_risk": temporal_score},
-            "audio": {"status": "success", "lip_sync_score": 0.1} if audio_analysis else {"status": "not_evaluated"}
-        }
-        return calculate_risk_score(analyses, self.weights)
+    def __call__(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.score(signals)
 
-    def calculate(self, analyses: Dict[str, Any], weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-        return calculate_risk_score(analyses, weights or self.weights)
+
+RiskScorer = DeepfakeRiskScorer
+
+
+def calculate_risk_score(
+    signals: Optional[Dict[str, Any]] = None,
+    weights: Optional[Dict[str, float]] = None,
+    visual_weight: float = 0.65,
+    temporal_weight: float = 0.20,
+    audio_weight: float = 0.15,
+    suspicious_threshold: float = 0.50,
+) -> Dict[str, Any]:
+    if isinstance(weights, dict):
+        vw = weights.get("visual", weights.get("visual_weight", 0.0))
+        tw = weights.get("temporal", weights.get("temporal_weight", 0.0))
+        aw = weights.get("audio", weights.get("audio_weight", 0.0))
+    else:
+        vw = visual_weight
+        tw = temporal_weight
+        aw = audio_weight
+
+    scorer = DeepfakeRiskScorer(
+        visual_weight=vw,
+        temporal_weight=tw,
+        audio_weight=aw,
+        suspicious_threshold=suspicious_threshold,
+    )
+    return scorer.score(signals)

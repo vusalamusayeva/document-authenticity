@@ -1,20 +1,27 @@
-"""
-Explainability Layer (pipeline addım 6)
-- hansı bölgənin/əlamətin şübhəli olduğunu göstərən mask
-"""
-
-from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 
-@dataclass
-class ExplanationResult:
-    mask: object  # şübhəli bölgələri göstərən piksel-səviyyəli mask
-    top_contributing_modules: list[str]  # məs. ["forensics", "ocr"]
+class Explainer:
+    """Qərar və siqnallar əsasında izahlı xülasə formalaşdırır."""
 
+    def explain(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        data = payload or {}
+        decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+        signals = data.get("signals") if isinstance(data.get("signals"), dict) else data
 
-def generate_explanation(module_outputs: dict, cfg: dict) -> ExplanationResult:
-    """
-    module_outputs: forensics/ocr/signature_stamp/metadata modullarının nəticələri.
-    configs/model.yaml -> explainability.method (məs. grad_cam) istifadə olunur.
-    """
-    raise NotImplementedError
+        summary = decision.get("summary") or decision.get("reason")
+        if not summary:
+            status = decision.get("status", "evaluated")
+            summary = f"Analiz yekunlaşdı (status={status})."
+
+        return {
+            "status": "success",
+            "summary": str(summary),
+            "signals_count": len(signals) if isinstance(signals, dict) else 0,
+        }
+
+    def analyze(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.explain(payload)
+
+    def __call__(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.explain(payload)

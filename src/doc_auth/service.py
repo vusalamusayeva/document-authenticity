@@ -1,0 +1,147 @@
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+from doc_auth.classification.document_classifier import DocumentClassifier
+from doc_auth.explainability import explain as explain_module
+from doc_auth.forensics.tampering_detection import TamperingDetector
+from doc_auth.fusion.decision_model import DecisionModel
+from doc_auth.ingestion.dataset_loader import DatasetLoader
+from doc_auth.ingestion.document_detection import DocumentDetector
+from doc_auth.metadata.metadata_analysis import MetadataAnalyzer
+from doc_auth.ocr.ocr_check import OCRChecker
+from doc_auth.schemas.pipeline_schemas import ArtifactCheckResult, DocumentAuthSummary
+
+
+def _default_explainer() -> Any:
+    if hasattr(explain_module, "Explainer"):
+        return explain_module.Explainer()
+    for attr_name in dir(explain_module):
+        obj = getattr(explain_module, attr_name)
+        if callable(obj) and not attr_name.startswith("_"):
+            return obj
+    raise RuntimeError("doc_auth.explainability.explain modulunda izah komponenti tapılmadı.")
+
+
+class AnalysisService:
+    """
+    Sənəd autentifikasiyası üçün ingestion, metadata, OCR, classification,
+    forensics, fusion və explainability modullarını real axında birləşdirir.
+    """
+
+    def __init__(
+        self,
+        loader: Optional[Any] = None,
+        detector: Optional[Any] = None,
+        metadata_analyzer: Optional[Any] = None,
+        ocr_checker: Optional[Any] = None,
+        classifier: Optional[Any] = None,
+        tampering_detector: Optional[Any] = None,
+        decision_model: Optional[Any] = None,
+        explainer: Optional[Any] = None,
+    ) -> None:
+        self.loader = loader if loader is not None else DatasetLoader()
+        self.detector = detector if detector is not None else DocumentDetector()
+        self.metadata_analyzer = metadata_analyzer if metadata_analyzer is not None else MetadataAnalyzer()
+        self.ocr_checker = ocr_checker if ocr_checker is not None else OCRChecker()
+        self.classifier = classifier if classifier is not None else DocumentClassifier()
+        self.tampering_detector = tampering_detector if tampering_detector is not None else TamperingDetector()
+        self.decision_model = decision_model if decision_model is not None else DecisionModel()
+        self.explainer = explainer if explainer is not None else _default_explainer()
+
+    @staticmethod
+    def _invoke_module(component: Any, method_candidates: tuple[str, ...], payload: Any) -> Dict[str, Any]:
+        for name in method_candidates:
+            fn: Optional[Callable[..., Any]] = getattr(component, name, None)
+            if callable(fn):
+                res = fn(payload)
+                if isinstance(res, dict):
+                    return res
+                return {"status": "success", "result": res}
+        if callable(component):
+            res = component(payload)
+            if isinstance(res, dict):
+                return res
+            return {"status": "success", "result": res}
+        raise RuntimeError(f"{type(component).__name__} üçün uyğun icra metodu tapılmadı.")
+
+    def _run_classifier(self, detected: Dict[str, Any], ocr: Dict[str, Any]) -> Dict[str, Any]:
+        features = [[
+            float(detected.get("area_ratio") or 0.0),
+            float(ocr.get("text_density") or 0.0),
+            1.0 if detected.get("detected") else 0.0,
+        ]]
+        for name in ("classify", "predict_proba", "predict", "analyze"):
+            fn: Optional[Callable[..., Any]] = getattr(self.classifier, name, None)
+            if callable(fn):
+                try:
+                    out = fn(features)
+                    if isinstance(out, dict):
+                        return out
+                    return {"status": "success", "predictions": out}
+                except Exception as exc:
+                    return {"status": "unavailable", "error": str(exc)}
+        return {"status": "unavailable", "error": "Uyğun klassifikasiya metodu tapılmadı."}
+
+    def analyze(self, document_path: str | Path) -> Dict[str, Any]:
+        path = Path(document_path)
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"Sənəd faylı tapılmadı: {path}")
+
+        ingested = self._invoke_module(self.loader, ("load", "load_document", "analyze"), path)
+        detected = self._invoke_module(self.detector, ("detect", "detect_document", "analyze"), ingested)
+        metadata = self._invoke_module(self.metadata_analyzer, ("analyze", "extract", "inspect"), path)
+        ocr = self._invoke_module(self.ocr_checker, ("check", "run", "analyze"), detected)
+        classification = self._run_classifier(detected, ocr)
+        forensics = self._invoke_module(self.tampering_detector, ("detect", "analyze", "run"), detected)
+
+        fusion_input = {
+            "ingestion": ingested,
+            "detection": detected,
+            "metadata": metadata,
+            "ocr": ocr,
+            "classification": classification,
+            "forensics": forensics,
+        }
+        decision = self._invoke_module(self.decision_model, ("decide", "predict", "fuse", "analyze"), fusion_input)
+        explanation = self._invoke_module(
+            self.explainer,
+            ("explain", "generate", "analyze"),
+            {"decision": decision, "signals": fusion_input},
+        )
+
+        return {
+            "status": decision.get("status", "success"),
+            "document_path": str(path),
+            "ingestion": ingested,
+            "detection": detected,
+            "metadata": metadata,
+            "ocr": ocr,
+            "classification": classification,
+            "forensics": forensics,
+            "decision": decision,
+            "explanation": explanation,
+        }
+
+    def analyze_summary(self, document_path: str | Path) -> DocumentAuthSummary:
+        raw = self.analyze(document_path)
+        checks: List[ArtifactCheckResult] = []
+        for mod_name in ("ingestion", "detection", "metadata", "ocr", "classification", "forensics"):
+            mod_res = raw.get(mod_name) if isinstance(raw.get(mod_name), dict) else {}
+            checks.append(
+                ArtifactCheckResult(
+                    module=mod_name,
+                    status=str(mod_res.get("status", "unknown")),
+                    score=mod_res.get("score") if isinstance(mod_res.get("score"), (int, float)) else None,
+                    is_suspicious=mod_res.get("is_suspicious") if isinstance(mod_res.get("is_suspicious"), bool) else None,
+                    details=mod_res,
+                )
+            )
+        decision = raw.get("decision") if isinstance(raw.get("decision"), dict) else {}
+        return DocumentAuthSummary(
+            request_id=Path(document_path).name,
+            status=str(raw.get("status", "completed")),
+            overall_risk_score=decision.get("risk_score") if isinstance(decision.get("risk_score"), (int, float)) else None,
+            decision=str(decision.get("decision", "inconclusive")),
+            checks=checks,
+            metadata={"document_path": str(document_path)},
+        )

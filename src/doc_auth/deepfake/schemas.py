@@ -1,37 +1,37 @@
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Any
 
-class DeepfakeConfig(BaseModel):
-    max_file_size_mb: int = Field(default=100)
-    max_duration_sec: float = Field(default=60.0)
-    max_resolution: tuple = Field(default=(1920, 1080))
-    max_frames: int = Field(default=300)
-    sampling_rate_fps: float = Field(default=2.0)
 
-class VideoMetadata(BaseModel):
-    filename: str
-    format: str
-    duration_sec: float
-    width: int
-    height: int
-    fps: float
-    total_frames: int
-    has_audio: bool
-    audio_duration_sec: Optional[float] = None
+class FacePredictionSchema(BaseModel):
+    face_index: int = 0
+    bbox: List[int] = Field(default_factory=list)
+    score: float
+    is_deepfake: bool = False
+    frame_index: Optional[int] = None
+    timestamp: Optional[float] = None
 
-class FrameAnalysisResult(BaseModel):
-    frame_index: int
-    timestamp_ms: float
-    face_detected: bool
-    deepfake_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    bounding_boxes: List[List[float]] = []
 
-class DeepfakeAnalysisResult(BaseModel):
-    status: str = Field(default="success", description="success, partial, failed, model_unavailable")
-    metadata: Optional[VideoMetadata] = None
+class AudioAnalysisSchema(BaseModel):
+    status: str = "unknown"
+    has_audio: Optional[bool] = None
+    audio_duration: Optional[float] = None
+    video_duration: Optional[float] = None
+    duration_diff: Optional[float] = None
+    rms_energy: Optional[float] = None
+    lip_sync_score: Optional[float] = None
+    is_suspicious: Optional[bool] = None
+
+
+class DeepfakeAnalysisResponse(BaseModel):
+    status: str
+    is_deepfake: Optional[bool] = None
+    risk_score: Optional[float] = None
+    max_visual_score: Optional[float] = None
+    error_type: Optional[str] = None
+    error: Optional[str] = None
+    module_statuses: Dict[str, str] = Field(default_factory=dict)
+    audio: Optional[Dict[str, Any]] = None
     frames_analyzed: int = 0
-    temporal_inconsistency_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    audio_status: Dict[str, Any] = {}
-    overall_risk_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    is_suspicious: bool = False
-    error_message: Optional[str] = None
+    faces_detected: int = 0
+    face_predictions: List[Dict[str, Any]] = Field(default_factory=list)

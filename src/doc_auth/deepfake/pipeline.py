@@ -1,97 +1,213 @@
-import os
-import tempfile
-from typing import Dict, Any, Optional
-from doc_auth.deepfake.video_loader import validate_video_metadata
-from doc_auth.deepfake.frame_sampler import sample_frames
-from doc_auth.deepfake.face_detector import detect_faces
-from doc_auth.deepfake.visual_detector import analyze_visual_artifacts
-from doc_auth.deepfake.temporal_analysis import analyze_temporal
-from doc_auth.deepfake.audio_analysis import analyze_audio
-from doc_auth.deepfake.risk_scoring import calculate_risk_score
-from doc_auth.deepfake.exceptions import DocAuthError
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
-def analyze_video_deepfake(video_bytes: bytes, config: Optional[Dict[str, Any]] = None, model_checkpoint: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Video bayitlərini qəbul edir, müvəqqəti fayla yazır, bütün mərhələləri (loader, 
-    sampler, face detection, visual, temporal, audio, risk scoring) birləşdirir 
-    və finally blokunda müvəqqəti faylı təmizləyir.
-    """
-    config = config or {}
-    temp_file_path = None
+import numpy as np
 
-    try:
-        # Müvəqqəti faylın yaradılması
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-            tmp.write(video_bytes)
-            temp_file_path = tmp.name
+from doc_auth.deepfake.audio_analysis import AudioLipSyncAnalyzer
+from doc_auth.deepfake.exceptions import ModelUnavailableError, VideoValidationError
+from doc_auth.deepfake.face_detector import FaceDetector
+from doc_auth.deepfake.visual_detector import VisualDetector
 
-        # 1. Video metadata və loader yoxlaması
-        metadata = validate_video_metadata(temp_file_path, config)
 
-        # 2. Frame sampling
-        sample_rate = config.get("sample_rate", 5)
-        max_frames = config.get("max_frames", 20)
-        
-        frames_predictions = []
-        frame_iter = sample_frames(temp_file_path, sample_rate=sample_rate, max_frames=max_frames)
+class DeepfakePipeline:
+    def __init__(
+        self,
+        face_detector: Optional[FaceDetector] = None,
+        visual_detector: Optional[VisualDetector] = None,
+        audio_analyzer: Optional[AudioLipSyncAnalyzer] = None,
+        frame_sampler: Optional[Callable[[str | Path], Iterable[Dict[str, Any]]]] = None,
+        risk_scorer: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    ) -> None:
+        self.face_detector = face_detector or FaceDetector()
+        self.visual_detector = visual_detector
+        self.audio_analyzer = audio_analyzer or AudioLipSyncAnalyzer()
+        self.frame_sampler = frame_sampler
+        self.risk_scorer = risk_scorer
 
-        for item in frame_iter:
-            frame = item["frame"]
-            # 3. Face detection
-            faces = detect_faces(frame)
-            for face in faces:
-                # 4. Visual analysis
-                visual_res = analyze_visual_artifacts(face["crop"], model_checkpoint=model_checkpoint)
-                frames_predictions.append({
-                    "frame_index": item["frame_index"],
-                    "timestamp_ms": item["timestamp_ms"],
-                    "score": visual_res.get("score"),
-                    "is_deepfake": visual_res.get("is_deepfake")
-                })
-
-        # 5. Temporal analysis
-        temporal_res = analyze_temporal(frames_predictions)
-
-        # 6. Audio analysis
-        audio_res = analyze_audio(temp_file_path)
-
-        # Analiz nəticələrinin yığılması
-        analyses = {
-            "visual": {"status": "success", "score": frames_predictions[-1]["score"] if frames_predictions else 0.0},
-            "temporal": temporal_res,
-            "audio": audio_res
-        }
-
-        # 7. Risk scoring
-        risk_result = calculate_risk_score(analyses, config.get("weights"))
-
-        return {
-            "status": "success",
-            "metadata": metadata,
-            "deepfake_result": {
-                "is_deepfake": risk_result.get("decision") == "fake",
-                "risk_score": risk_result.get("risk_score"),
-                "decision": risk_result.get("decision"),
-                "frames_analyzed": len(frames_predictions)
+    def run(
+        self,
+        video_path: Any,
+        frames: Optional[Iterable[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        if isinstance(video_path, (bytes, bytearray, memoryview)) or not isinstance(video_path, (str, Path)):
+            return {
+                "status": "failed",
+                "is_deepfake": None,
+                "risk_score": None,
+                "error_type": "InvalidInputError",
+                "error": "Etibarsız video yolu və ya xam bayt daxil edilib.",
+                "module_statuses": {
+                    "visual": "failed",
+                    "audio": "not_run",
+                },
+                "frames_analyzed": 0,
+                "faces_detected": 0,
             }
+
+        path = Path(video_path)
+
+        try:
+            audio_result = self.audio_analyzer.analyze(path)
+        except Exception as exc:
+            audio_result = {"status": "error", "error": str(exc)}
+
+        if self.visual_detector is None:
+            return {
+                "status": "model_unavailable",
+                "is_deepfake": None,
+                "risk_score": None,
+                "module_statuses": {
+                    "visual": "model_unavailable",
+                    "audio": audio_result.get("status", "unknown"),
+                },
+                "audio": audio_result,
+                "frames_analyzed": 0,
+                "faces_detected": 0,
+            }
+
+        try:
+            self.visual_detector.verify_model_weights()
+        except ModelUnavailableError as exc:
+            return {
+                "status": "model_unavailable",
+                "is_deepfake": None,
+                "risk_score": None,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "module_statuses": {
+                    "visual": "model_unavailable",
+                    "audio": audio_result.get("status", "unknown"),
+                },
+                "audio": audio_result,
+                "frames_analyzed": 0,
+                "faces_detected": 0,
+            }
+
+        try:
+            frame_stream = (
+                frames
+                if frames is not None
+                else (self.frame_sampler(path) if self.frame_sampler is not None else [])
+            )
+
+            sampled_frames: List[Dict[str, Any]] = []
+            for item in frame_stream:
+                if isinstance(item, np.ndarray):
+                    sampled_frames.append({"frame": item, "timestamp": None})
+                elif isinstance(item, dict) and "frame" in item:
+                    sampled_frames.append(item)
+        except VideoValidationError as exc:
+            return {
+                "status": "failed",
+                "is_deepfake": None,
+                "risk_score": None,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "module_statuses": {
+                    "visual": "failed",
+                    "audio": audio_result.get("status", "unknown"),
+                },
+                "audio": audio_result,
+                "frames_analyzed": 0,
+                "faces_detected": 0,
+            }
+
+        if not sampled_frames:
+            return {
+                "status": "no_frames",
+                "is_deepfake": None,
+                "risk_score": None,
+                "module_statuses": {
+                    "visual": "no_frames",
+                    "audio": audio_result.get("status", "unknown"),
+                },
+                "audio": audio_result,
+                "frames_analyzed": 0,
+                "faces_detected": 0,
+            }
+
+        total_faces = 0
+        all_face_predictions: List[Dict[str, Any]] = []
+        for idx, item in enumerate(sampled_frames):
+            frame = item["frame"]
+            ts = item.get("timestamp")
+            faces = self.face_detector.detect_faces(frame)
+            if not faces:
+                continue
+            total_faces += len(faces)
+            frame_pred = self.visual_detector.analyze_frame(frame, faces=faces)
+            if frame_pred.get("status") == "success":
+                for fp in frame_pred.get("face_predictions", []):
+                    entry = dict(fp)
+                    entry["frame_index"] = idx
+                    entry["timestamp"] = ts
+                    all_face_predictions.append(entry)
+
+        if total_faces == 0 or not all_face_predictions:
+            return {
+                "status": "no_face",
+                "is_deepfake": None,
+                "risk_score": None,
+                "module_statuses": {
+                    "visual": "no_face",
+                    "audio": audio_result.get("status", "unknown"),
+                },
+                "audio": audio_result,
+                "frames_analyzed": len(sampled_frames),
+                "faces_detected": 0,
+            }
+
+        scores = [p["score"] for p in all_face_predictions]
+        max_visual_score = float(max(scores))
+
+        if self.risk_scorer is not None:
+            scored = self.risk_scorer({
+                "visual": {"status": "success", "score": max_visual_score},
+                "audio": audio_result,
+            })
+            risk_score = scored.get("risk_score")
+            decision = scored.get("decision", "inconclusive")
+            if decision == "inconclusive" or risk_score is None:
+                is_deepfake = None
+                overall_status = "partial"
+            else:
+                is_deepfake = bool(scored.get("is_suspicious", risk_score >= 0.5))
+                overall_status = "success"
+        else:
+            risk_score = max_visual_score
+            is_deepfake = risk_score >= self.visual_detector.threshold
+            overall_status = "success"
+
+        return {
+            "status": overall_status,
+            "is_deepfake": is_deepfake,
+            "risk_score": risk_score,
+            "max_visual_score": max_visual_score,
+            "module_statuses": {
+                "visual": "success",
+                "audio": audio_result.get("status", "unknown"),
+            },
+            "audio": audio_result,
+            "frames_analyzed": len(sampled_frames),
+            "faces_detected": total_faces,
+            "face_predictions": all_face_predictions,
         }
 
-    except DocAuthError as e:
-        return {
-            "status": "failed",
-            "error_type": type(e).__name__,
-            "message": str(e)
-        }
-    except Exception as e:
-        return {
-            "status": "failed",
-            "error_type": "InternalError",
-            "message": "Daxili sistem xətası baş verdi."
-        }
-    finally:
-        # Müvəqqəti faylın həmişə təmizlənməsi (cleanup)
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except Exception:
-                pass  # Cleanup xətası əsas nəticəni əvəz etmir
+
+def analyze_video_deepfake(
+    video_path: Any,
+    frames: Optional[Iterable[Dict[str, Any]]] = None,
+    face_detector: Optional[FaceDetector] = None,
+    visual_detector: Optional[VisualDetector] = None,
+    audio_analyzer: Optional[AudioLipSyncAnalyzer] = None,
+    frame_sampler: Optional[Callable[[str | Path], Iterable[Dict[str, Any]]]] = None,
+    risk_scorer: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    pipeline = DeepfakePipeline(
+        face_detector=face_detector,
+        visual_detector=visual_detector,
+        audio_analyzer=audio_analyzer,
+        frame_sampler=frame_sampler,
+        risk_scorer=risk_scorer,
+    )
+    return pipeline.run(video_path=video_path, frames=frames)

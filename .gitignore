@@ -29,3 +29,6 @@ model_registry/
 .DS_Store
 .idea/
 .vscode/
+
+venv/
+*.log

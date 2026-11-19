@@ -1,15 +1,22 @@
-class DocAuthError(Exception):
-    """Baza xəta sinfi."""
-    pass
+class DeepfakeError(Exception):
+    """Deepfake modulu üçün əsas xəta sinfi."""
 
-class VideoLoadError(DocAuthError):
-    """Video yüklənərkən və ya oxunarkən baş verən xətalar."""
-    pass
 
-class ModelUnavailableError(DocAuthError):
-    """Model mövcud olmadıqda və ya yüklənmədikdə."""
-    pass
+class InvalidConfigError(DeepfakeError, ValueError):
+    """Etibarsız konfiqurasiya və ya skor/çəki dəyəri xətası."""
 
-class InvalidConfigError(DocAuthError):
-    """Yanlış və ya etibarsız konfiqurasiya daxil edildikdə."""
-    pass
+
+class ModelUnavailableError(DeepfakeError):
+    """Model çəkisi və ya detektor əlçatan olmadıqda qaldırılan xəta."""
+
+
+class VideoValidationError(DeepfakeError):
+    """Video faylı və ya kadr axını etibarsız olduqda qaldırılan xəta."""
+
+
+class VideoLoadError(VideoValidationError):
+    """Video faylının açılması və ya oxunması zamanı baş verən xəta."""
+
+
+class FrameSamplingError(VideoValidationError):
+    """Kadrların seçilməsi (sampling) zamanı baş verən xəta."""
