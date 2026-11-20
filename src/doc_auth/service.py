@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
+
 from doc_auth.classification.document_classifier import DocumentClassifier
 from doc_auth.explainability import explain as explain_module
 from doc_auth.forensics.tampering_detection import TamperingDetector
@@ -20,6 +22,23 @@ def _default_explainer() -> Any:
         if callable(obj) and not attr_name.startswith("_"):
             return obj
     raise RuntimeError("doc_auth.explainability.explain modulunda izah komponenti tapılmadı.")
+
+
+def _sanitize_for_json(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return {
+            "ndarray_shape": list(value.shape),
+            "ndarray_dtype": str(value.dtype),
+        }
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_for_json(item) for item in value]
+    return value
 
 
 class AnalysisService:
@@ -109,7 +128,7 @@ class AnalysisService:
             {"decision": decision, "signals": fusion_input},
         )
 
-        return {
+        return _sanitize_for_json({
             "status": decision.get("status", "success"),
             "document_path": str(path),
             "ingestion": ingested,
@@ -120,27 +139,29 @@ class AnalysisService:
             "forensics": forensics,
             "decision": decision,
             "explanation": explanation,
-        }
+        })
 
     def analyze_summary(self, document_path: str | Path) -> DocumentAuthSummary:
         raw = self.analyze(document_path)
         checks: List[ArtifactCheckResult] = []
         for mod_name in ("ingestion", "detection", "metadata", "ocr", "classification", "forensics"):
             mod_res = raw.get(mod_name) if isinstance(raw.get(mod_name), dict) else {}
+            sanitized_details = _sanitize_for_json(mod_res)
             checks.append(
                 ArtifactCheckResult(
                     module=mod_name,
                     status=str(mod_res.get("status", "unknown")),
-                    score=mod_res.get("score") if isinstance(mod_res.get("score"), (int, float)) else None,
-                    is_suspicious=mod_res.get("is_suspicious") if isinstance(mod_res.get("is_suspicious"), bool) else None,
-                    details=mod_res,
+                    score=float(mod_res["score"]) if isinstance(mod_res.get("score"), (int, float, np.number)) else None,
+                    is_suspicious=mod_res.get("is_suspicious") if isinstance(mod_res.get("is_suspicious"), (bool, np.bool_)) else None,
+                    details=sanitized_details if isinstance(sanitized_details, dict) else {"value": sanitized_details},
                 )
             )
         decision = raw.get("decision") if isinstance(raw.get("decision"), dict) else {}
+        risk_val = decision.get("risk_score")
         return DocumentAuthSummary(
             request_id=Path(document_path).name,
             status=str(raw.get("status", "completed")),
-            overall_risk_score=decision.get("risk_score") if isinstance(decision.get("risk_score"), (int, float)) else None,
+            overall_risk_score=float(risk_val) if isinstance(risk_val, (int, float, np.number)) else None,
             decision=str(decision.get("decision", "inconclusive")),
             checks=checks,
             metadata={"document_path": str(document_path)},
