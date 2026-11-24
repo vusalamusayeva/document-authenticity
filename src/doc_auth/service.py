@@ -83,23 +83,53 @@ class AnalysisService:
             return {"status": "success", "result": res}
         raise RuntimeError(f"{type(component).__name__} üçün uyğun icra metodu tapılmadı.")
 
-    def _run_classifier(self, detected: Dict[str, Any], ocr: Dict[str, Any]) -> Dict[str, Any]:
-        features = [[
-            float(detected.get("area_ratio") or 0.0),
-            float(ocr.get("text_density") or 0.0),
-            1.0 if detected.get("detected") else 0.0,
-        ]]
-        for name in ("classify", "predict_proba", "predict", "analyze"):
+    def _run_classifier(
+        self,
+        detected: Dict[str, Any],
+        ocr: Dict[str, Any],
+        ingested: Dict[str, Any] | None = None,
+        document_path: Path | None = None,
+    ) -> Dict[str, Any]:
+        payload: Any = None
+        for container in (detected, ingested or {}):
+            if isinstance(container, dict):
+                for key in ("image", "frame", "array", "aligned_image", "page_image"):
+                    if key in container and container[key] is not None:
+                        payload = container[key]
+                        break
+            if payload is not None:
+                break
+
+        if payload is None and isinstance((ingested or {}).get("pages"), list) and len(ingested["pages"]) > 0:
+            first_page = ingested["pages"][0]
+            if isinstance(first_page, dict):
+                for key in ("image", "frame", "array"):
+                    if key in first_page and first_page[key] is not None:
+                        payload = first_page[key]
+                        break
+
+        if payload is None and document_path is not None:
+            payload = {
+                "document_path": str(document_path),
+                "features": [
+                    float(detected.get("area_ratio") or 0.0),
+                    float(ocr.get("text_density") or 0.0),
+                    1.0 if detected.get("detected") else 0.0,
+                    float(ocr.get("char_count") or 0.0) / 1000.0,
+                ],
+            }
+
+        for name in ("classify", "predict", "predict_proba", "analyze"):
             fn: Optional[Callable[..., Any]] = getattr(self.classifier, name, None)
             if callable(fn):
                 try:
-                    out = fn(features)
+                    out = fn(payload)
                     if isinstance(out, dict):
                         return out
                     return {"status": "success", "predictions": out}
                 except Exception as exc:
                     return {"status": "unavailable", "error": str(exc)}
-        return {"status": "unavailable", "error": "Uyğun klassifikasiya metodu tapılmadı."}
+        return {"status": "unavailable", "error": "Uy?un klassifikasiya metodu tap?lmad?."}
 
     def analyze(self, document_path: str | Path) -> Dict[str, Any]:
         path = Path(document_path)
@@ -110,7 +140,7 @@ class AnalysisService:
         detected = self._invoke_module(self.detector, ("detect", "detect_document", "analyze"), ingested)
         metadata = self._invoke_module(self.metadata_analyzer, ("analyze", "extract", "inspect"), path)
         ocr = self._invoke_module(self.ocr_checker, ("check", "run", "analyze"), detected)
-        classification = self._run_classifier(detected, ocr)
+        classification = self._run_classifier(detected, ocr, ingested=ingested, document_path=path)
         forensics = self._invoke_module(self.tampering_detector, ("detect", "analyze", "run"), detected)
 
         fusion_input = {

@@ -175,22 +175,27 @@ class AudioLipSyncAnalyzer:
         )
         rms = self._extract_pcm_rms(path)
 
-        score = 0.1
+        duration_rms_risk = 0.0
         if duration_diff is not None and duration_diff > self.max_duration_diff_sec:
-            score += min(0.6, duration_diff / 2.0)
+            duration_rms_risk += min(0.6, duration_diff / 2.0)
         if rms is not None and rms < 1e-4:
-            score += 0.25
+            duration_rms_risk += 0.25
+        duration_rms_score = round(min(1.0, max(0.0, duration_rms_risk)), 4)
 
-        lip_sync_score = round(min(1.0, max(0.0, score)), 4)
+        # Lip-sync modeli ?v?zin? yaln?z audio/video m?dd?t uy?unlu?u v? RMS s?s enerjisi ?l??l?r
+        lip_sync_score = round(min(1.0, max(0.0, 0.1 + duration_rms_risk)), 4)
         is_suspicious = bool(lip_sync_score >= 0.5)
 
         return {
             "status": "success",
             "has_audio": True,
+            "signal_type": "audio_duration_and_rms_energy",
+            "is_lip_sync_model": False,
             "audio_duration": audio_dur,
             "video_duration": video_dur,
             "duration_diff": round(duration_diff, 4) if duration_diff is not None else None,
             "rms_energy": round(rms, 6) if rms is not None else None,
+            "audio_duration_rms_score": duration_rms_score,
             "lip_sync_score": lip_sync_score,
             "is_suspicious": is_suspicious,
         }

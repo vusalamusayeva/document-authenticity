@@ -96,6 +96,21 @@ class VisualDetector:
                     )
                 if not (np.all(np.isfinite(weights)) and np.all(np.isfinite(bias)) and np.all(np.isfinite(lap_scale))):
                     raise ModelUnavailableError("NPZ model parametrlərində NaN/Inf dəyər var.")
+                if "input_size" in keys:
+                    ckpt_size = np.asarray(archive["input_size"]).reshape(-1)
+                    if ckpt_size.size != 2 or (int(ckpt_size[0]), int(ckpt_size[1])) != self.input_size:
+                        raise ModelUnavailableError(
+                            f"Checkpoint input_size uy?unsuzlu?u: g?zl?nil?n {self.input_size}, al?nan {tuple(int(x) for x in ckpt_size)}."
+                        )
+
+                if "class_mapping" in keys:
+                    raw_map = str(np.asarray(archive["class_mapping"]).reshape(-1)[0])
+                    parsed_map = json.loads(raw_map)
+                    if not isinstance(parsed_map, dict) or parsed_map.get("0") != "real" or parsed_map.get("1") != "deepfake":
+                        raise ModelUnavailableError(
+                            f"Checkpoint class_mapping uy?unsuzlu?u: {parsed_map}"
+                        )
+
                 self._weights_data = {
                     "weights": weights,
                     "bias": bias,

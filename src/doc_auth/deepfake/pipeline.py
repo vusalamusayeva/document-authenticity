@@ -225,7 +225,7 @@ class DeepfakePipeline:
 
         total_faces = 0
         all_face_predictions: List[Dict[str, Any]] = []
-        tracked_detections: List[Dict[str, Any]] = []
+        frame_face_items: List[Dict[str, Any]] = []
 
         for idx, item in enumerate(sampled_frames):
             frame = item["frame"]
@@ -233,22 +233,31 @@ class DeepfakePipeline:
             ts = item.get("timestamp")
             faces = self.face_detector.detect_faces(frame)
             if not faces:
+                frame_face_items.append({
+                    "frame_index": frame_idx,
+                    "timestamp": ts if ts is not None else float(idx),
+                    "faces": [],
+                })
                 continue
             total_faces += len(faces)
             frame_pred = self.visual_detector.analyze_frame(frame, faces=faces)
+            frame_faces_payload: List[Dict[str, Any]] = []
             if frame_pred.get("status") == "success":
-                for fp in frame_pred.get("face_predictions", []):
+                for i_f, fp in enumerate(frame_pred.get("face_predictions", [])):
                     entry = dict(fp)
                     entry["frame_index"] = frame_idx
                     entry["timestamp"] = ts
                     all_face_predictions.append(entry)
-                    tracked_detections.append({
-                        "frame_index": frame_idx,
-                        "timestamp": ts,
-                        "bbox": entry.get("bbox"),
+                    frame_faces_payload.append({
+                        "bbox": entry.get("bbox", faces[i_f].get("bbox", [0, 0, 0, 0]) if i_f < len(faces) else [0, 0, 0, 0]),
                         "score": entry.get("score", 0.0),
                         "is_deepfake": entry.get("is_deepfake", False),
                     })
+            frame_face_items.append({
+                "frame_index": frame_idx,
+                "timestamp": ts if ts is not None else float(idx),
+                "faces": frame_faces_payload,
+            })
 
         if total_faces == 0 or not all_face_predictions:
             return {
@@ -268,7 +277,7 @@ class DeepfakePipeline:
             }
 
         try:
-            tracks = assign_face_tracks(tracked_detections)
+            tracks = assign_face_tracks(frame_face_items)
             temporal_summary = self.temporal_analyzer.analyze(tracks)
             temporal_status = "success"
         except Exception as exc:

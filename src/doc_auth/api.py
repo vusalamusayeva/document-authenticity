@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, Optional
+import uuid
 
 from fastapi import APIRouter, FastAPI, File, HTTPException, UploadFile
 
@@ -9,6 +10,7 @@ from doc_auth.service import AnalysisService
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB
+CHUNK_SIZE = 65536
 
 
 def create_document_router(
@@ -21,32 +23,38 @@ def create_document_router(
     @router.post("/analyze", response_model=DocumentAuthSummary)
     async def analyze_document_endpoint(file: UploadFile = File(...)) -> DocumentAuthSummary:
         if not file.filename:
-            raise HTTPException(status_code=400, detail="Fayl adı tələb olunur.")
+            raise HTTPException(status_code=400, detail="Fayl ad? t?l?b olunur.")
 
         ext = Path(file.filename).suffix.lower()
         if ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Dəstəklənməyən fayl formatı: {ext or 'naməlum'}.",
-            )
-
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="Yüklənən fayl boşdur.")
-
-        if len(content) > max_upload_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail="Fayl ölçüsü icazə verilən həddi keçir.",
+                detail=f"D?st?kl?nm?y?n fayl format?: {ext or 'nam?lum'}.",
             )
 
         temp_dir = Path("tmp_uploads")
         temp_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = f"upload_{Path(file.filename).name}"
-        temp_path = temp_dir / safe_name
+        unique_name = f"upload_{uuid.uuid4().hex}{ext}"
+        temp_path = temp_dir / unique_name
+        total_bytes = 0
 
         try:
-            temp_path.write_bytes(content)
+            with temp_path.open("wb") as out_file:
+                while True:
+                    chunk = await file.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="Fayl ?l??s? icaz? veril?n h?ddi ke?ir.",
+                        )
+                    out_file.write(chunk)
+
+            if total_bytes == 0:
+                raise HTTPException(status_code=400, detail="Y?kl?n?n fayl bo?dur.")
+
             summary = service.analyze_summary(temp_path)
             if isinstance(summary, DocumentAuthSummary):
                 return summary
@@ -54,7 +62,7 @@ def create_document_router(
                 return DocumentAuthSummary.model_validate(summary)
             raise HTTPException(
                 status_code=500,
-                detail="Analiz xidmətindən gözlənilməyən nəticə qaytarıldı.",
+                detail="Analiz xidm?tind?n g?zl?nilm?y?n n?tic? qaytar?ld?.",
             )
         except HTTPException:
             raise
@@ -65,7 +73,7 @@ def create_document_router(
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Sənəd analizi zamanı xəta baş verdi: {exc}",
+                detail=f"S?n?d analizi zaman? x?ta ba? verdi: {exc}",
             ) from exc
         finally:
             if temp_path.exists():

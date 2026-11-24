@@ -27,12 +27,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e . --no-build-isolation || pip install pytest fastapi httpx python-multipart numpy opencv-python pydantic
-          pip install pytest pytest-cov httpx python-multipart
+          pip install --no-cache-dir -e ".[dev]"
 
-      - name: Verify OpenCV Haar cascade availability
+      - name: Verify OpenCV Haar cascade and face detection
         run: |
-          python -c "import cv2; from doc_auth.deepfake.face_detector import _load_face_cascade; c = _load_face_cascade(); assert not c.empty()"
+          python -c "import numpy as np; from doc_auth.deepfake.face_detector import _load_face_cascade, detect_faces; c = _load_face_cascade(); assert not c.empty(); out = detect_faces(np.zeros((120, 160, 3), dtype=np.uint8)); assert isinstance(out, list)"
 
       - name: Run pytest suite
         run: |
