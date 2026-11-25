@@ -156,6 +156,10 @@ class VideoStreamReader:
         self.metadata: Dict[str, Any] = {}
         self._cap: Optional[cv2.VideoCapture] = None
 
+    @property
+    def cap(self) -> Optional[cv2.VideoCapture]:
+        return self._cap
+
     def __enter__(self) -> "VideoStreamReader":
         self.metadata = validate_video(self.path, self.config)
         cap = cv2.VideoCapture(str(self.path))

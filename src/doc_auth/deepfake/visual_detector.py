@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,7 +18,7 @@ except ImportError:  # pragma: no cover
 
 
 class VisualDetector:
-    # Bu mühitdə həqiqətən yüklənə bilən formatlar (.npz həmişə, .pt/.pth yalnız torch olduqda)
+    # Bu m?hitd? h?qiq?t?n y?kl?n? bil?n formatlar (.npz h?mi??, .pt/.pth yaln?z torch olduqda)
     SUPPORTED_SUFFIXES = {".npz", ".pt", ".pth"}
 
     def __init__(
@@ -28,13 +29,14 @@ class VisualDetector:
         face_detector: Optional[FaceDetector] = None,
         input_size: tuple[int, int] = (224, 224),
         device: str = "cpu",
+        expected_sha256: Optional[str] = None,
     ) -> None:
         if (
             isinstance(threshold, bool)
             or not isinstance(threshold, (int, float))
             or not (0.0 <= float(threshold) <= 1.0)
         ):
-            raise InvalidConfigError("threshold [0.0, 1.0] aralığında olmalıdır.")
+            raise InvalidConfigError("threshold [0.0, 1.0] aral???nda olmal?d?r.")
         resolved_path = checkpoint_path if checkpoint_path is not None else model_path
         self.checkpoint_path = Path(resolved_path) if resolved_path is not None else None
         self.model_path = self.checkpoint_path
@@ -42,26 +44,44 @@ class VisualDetector:
         self.face_detector = face_detector or FaceDetector()
         self.input_size = (int(input_size[0]), int(input_size[1]))
         self.device = device
+        self.expected_sha256 = expected_sha256.strip().lower() if expected_sha256 else None
         self._weights_verified = False
         self._model: Any = None
         self._weights_data: Optional[Dict[str, np.ndarray]] = None
 
+    @staticmethod
+    def compute_file_sha256(file_path: Path, chunk_size: int = 65536) -> str:
+        digest = hashlib.sha256()
+        with file_path.open("rb") as fh:
+            while True:
+                chunk = fh.read(chunk_size)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest().lower()
+
     def verify_model_weights(self) -> bool:
         if self.checkpoint_path is None:
-            raise ModelUnavailableError("VisualDetector checkpoint faylı göstərilməyib.")
+            raise ModelUnavailableError("VisualDetector checkpoint fayl? g?st?rilm?yib.")
         if not self.checkpoint_path.exists() or not self.checkpoint_path.is_file():
-            raise ModelUnavailableError(f"Model checkpoint faylı tapılmadı: {self.checkpoint_path}")
+            raise ModelUnavailableError(f"Model checkpoint fayl? tap?lmad?: {self.checkpoint_path}")
         if self.checkpoint_path.stat().st_size == 0:
-            raise ModelUnavailableError(f"Model checkpoint faylı boşdur: {self.checkpoint_path}")
+            raise ModelUnavailableError(f"Model checkpoint fayl? bo?dur: {self.checkpoint_path}")
         suffix = self.checkpoint_path.suffix.lower()
         if suffix not in self.SUPPORTED_SUFFIXES:
             raise ModelUnavailableError(
-                f"Dəstəklənməyən checkpoint formatı: {self.checkpoint_path.suffix}"
+                f"D?st?kl?nm?y?n checkpoint format?: {self.checkpoint_path.suffix}"
             )
         if suffix in {".pt", ".pth"} and torch is None:
             raise ModelUnavailableError(
-                "PyTorch quraşdırılmayıb; .pt/.pth checkpoint bu mühitdə yüklənə bilməz."
+                "PyTorch qura?d?r?lmay?b; .pt/.pth checkpoint bu m?hitd? y?kl?n? bilm?z."
             )
+        if self.expected_sha256:
+            actual_sha256 = self.compute_file_sha256(self.checkpoint_path)
+            if actual_sha256 != self.expected_sha256:
+                raise ModelUnavailableError(
+                    f"Model SHA-256 uy?unsuzlu?u: g?zl?nil?n {self.expected_sha256}, al?nan {actual_sha256}."
+                )
         self._weights_verified = True
         return True
 
@@ -85,17 +105,17 @@ class VisualDetector:
                 if not required_keys.issubset(keys):
                     missing = sorted(required_keys - keys)
                     raise ModelUnavailableError(
-                        f"NPZ model artefaktında vacib açarlar çatışmır: {missing}"
+                        f"NPZ model artefakt?nda vacib a?arlar ?at??m?r: {missing}"
                     )
                 weights = np.asarray(archive["weights"], dtype=np.float32)
                 bias = np.asarray(archive["bias"], dtype=np.float32).reshape(-1)
                 lap_scale = np.asarray(archive["laplacian_scale"], dtype=np.float32).reshape(-1)
                 if weights.ndim != 1 or weights.shape[0] != 4 or bias.shape[0] != 1 or lap_scale.shape[0] != 1:
                     raise ModelUnavailableError(
-                        "NPZ model çəkilərinin ölçüləri uyğun deyil (weights: (4,), bias: (1,), laplacian_scale: (1,))."
+                        "NPZ model ??kil?rinin ?l??l?ri uy?un deyil (weights: (4,), bias: (1,), laplacian_scale: (1,))."
                     )
                 if not (np.all(np.isfinite(weights)) and np.all(np.isfinite(bias)) and np.all(np.isfinite(lap_scale))):
-                    raise ModelUnavailableError("NPZ model parametrlərində NaN/Inf dəyər var.")
+                    raise ModelUnavailableError("NPZ model parametrl?rind? NaN/Inf d?y?r var.")
                 if "input_size" in keys:
                     ckpt_size = np.asarray(archive["input_size"]).reshape(-1)
                     if ckpt_size.size != 2 or (int(ckpt_size[0]), int(ckpt_size[1])) != self.input_size:
@@ -119,7 +139,7 @@ class VisualDetector:
             except ModelUnavailableError:
                 raise
             except Exception as exc:
-                raise ModelUnavailableError(f"NPZ model artefaktı yüklənə bilmədi: {exc}") from exc
+                raise ModelUnavailableError(f"NPZ model artefakt? y?kl?n? bilm?di: {exc}") from exc
 
             return {
                 "checkpoint_path": str(self.checkpoint_path),
@@ -135,7 +155,7 @@ class VisualDetector:
                     weights_only=False,
                 )
             except Exception as exc:
-                raise ModelUnavailableError(f"PyTorch checkpoint yüklənə bilmədi: {exc}") from exc
+                raise ModelUnavailableError(f"PyTorch checkpoint y?kl?n? bilm?di: {exc}") from exc
 
             if isinstance(loaded_obj, nn.Module):
                 model = loaded_obj.to(self.device)
@@ -147,13 +167,13 @@ class VisualDetector:
                     loaded_obj.get("model_state_dict", loaded_obj),
                 )
                 if not isinstance(state_dict, dict) or len(state_dict) == 0:
-                    raise ModelUnavailableError("Checkpoint daxilində etibarlı state_dict tapılmadı.")
+                    raise ModelUnavailableError("Checkpoint daxilind? etibarl? state_dict tap?lmad?.")
                 self._model = {
                     str(k).removeprefix("module."): v
                     for k, v in state_dict.items()
                 }
             else:
-                raise ModelUnavailableError("Checkpoint obyektinin formatı uyğun deyil.")
+                raise ModelUnavailableError("Checkpoint obyektinin format? uy?un deyil.")
 
             return {
                 "checkpoint_path": str(self.checkpoint_path),
@@ -161,7 +181,7 @@ class VisualDetector:
                 "backend": "torch_checkpoint",
             }
 
-        raise ModelUnavailableError(f"Model yüklənə bilmədi: {self.checkpoint_path}")
+        raise ModelUnavailableError(f"Model y?kl?n? bilm?di: {self.checkpoint_path}")
 
     def _extract_features(self, patch: np.ndarray) -> np.ndarray:
         resized = cv2.resize(patch, self.input_size, interpolation=cv2.INTER_AREA)
@@ -192,13 +212,12 @@ class VisualDetector:
             w = self._weights_data["weights"].copy()
             b = float(self._weights_data["bias"][0])
             scale = float(self._weights_data["laplacian_scale"][0])
-            # 3-cü xüsusiyyət (lap_var) normalizasiya olunur
             feats[2] = feats[2] / max(scale, 1e-6)
             logit = float(np.dot(w, feats) + b)
             prob = 1.0 / (1.0 + np.exp(-np.clip(logit, -20.0, 20.0)))
             return float(max(0.0, min(1.0, round(prob, 4))))
 
-        raise ModelUnavailableError("Aktiv model çəkiləri tapılmadı.")
+        raise ModelUnavailableError("Aktiv model ??kil?ri tap?lmad?.")
 
     def analyze_frame(
         self,

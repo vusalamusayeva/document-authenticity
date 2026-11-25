@@ -82,6 +82,76 @@ def create_document_router(
                 except OSError:
                     pass
 
+
+    idempotency_map: Dict[str, str] = {}
+
+    @router.post("/jobs")
+    async def create_analysis_job(
+        file: UploadFile = File(...),
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if idempotency_key and idempotency_key in idempotency_map:
+            existing_id = idempotency_map[idempotency_key]
+            return {"job_id": existing_id, "idempotent_replay": True, "status": "deduplicated"}
+
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Fayl ad? t?l?b olunur.")
+
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"D?st?kl?nm?y?n fayl format?: {ext or 'nam?lum'}.",
+            )
+
+        temp_dir = Path("tmp_uploads")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        unique_name = f"job_{uuid.uuid4().hex}{ext}"
+        temp_path = temp_dir / unique_name
+        total_bytes = 0
+
+        try:
+            with temp_path.open("wb") as out_file:
+                while True:
+                    chunk = await file.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="Fayl ?l??s? icaz? veril?n h?ddi ke?ir.",
+                        )
+                    out_file.write(chunk)
+
+            if total_bytes == 0:
+                raise HTTPException(status_code=400, detail="Y?kl?n?n fayl bo?dur.")
+
+            summary = service.analyze_summary(temp_path)
+            job_id = uuid.uuid4().hex
+            result_payload = summary.model_dump() if hasattr(summary, "model_dump") else dict(summary)
+            if idempotency_key:
+                idempotency_map[idempotency_key] = job_id
+            idempotency_map[f"__job__:{job_id}"] = result_payload  # type: ignore[assignment]
+            return {"job_id": job_id, "status": "completed", "result": result_payload}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Job icra x?tas?: {exc}") from exc
+        finally:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+
+    @router.get("/jobs/{job_id}")
+    async def get_analysis_job(job_id: str) -> Dict[str, Any]:
+        stored = idempotency_map.get(f"__job__:{job_id}")
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Job tap?lmad?.")
+        return {"job_id": job_id, "status": "completed", "result": stored}
+
     return router
 
 

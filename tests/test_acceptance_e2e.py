@@ -30,6 +30,31 @@ def test_acceptance_document_classification_and_service(tmp_path: Path) -> None:
     assert cv2.imwrite(str(img_path), img)
 
     clf = DocumentClassifier()
+    unfitted_res = clf.classify(img)
+    assert unfitted_res["status"] == "inconclusive"
+    assert unfitted_res["document_type"] == "unknown"
+
+    train_samples = [
+        _make_doc_image(360, 220),
+        _make_doc_image(370, 225),
+        _make_doc_image(240, 340),
+        _make_doc_image(250, 350),
+        _make_doc_image(600, 420),
+        _make_doc_image(620, 440),
+        np.zeros((180, 180, 3), dtype=np.uint8),
+        np.full((180, 180, 3), 15, dtype=np.uint8),
+    ]
+    train_labels = [
+        "id_card",
+        "id_card",
+        "passport",
+        "passport",
+        "certificate",
+        "certificate",
+        "unknown",
+        "unknown",
+    ]
+    clf.fit(train_samples, train_labels)
     cls_res = clf.classify(img)
     assert cls_res["status"] == "success"
     assert cls_res["document_type"] in clf.classes

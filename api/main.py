@@ -13,6 +13,17 @@ service = AnalysisService()
 attach_deepfake_router(app)
 
 
+
+import uuid
+from fastapi import Request
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
