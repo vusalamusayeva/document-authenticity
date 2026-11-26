@@ -13,15 +13,32 @@ MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB
 CHUNK_SIZE = 65536
 
 
+def _validate_magic_bytes(ext: str, head: bytes) -> bool:
+    if not head:
+        return False
+    if ext == ".pdf":
+        return head.startswith(b"%PDF-")
+    if ext == ".png":
+        return head.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext in {".jpg", ".jpeg"}:
+        return head.startswith(b"\xff\xd8\xff")
+    if ext == ".webp":
+        return len(head) >= 12 and head.startswith(b"RIFF") and head[8:12] == b"WEBP"
+    if ext in {".tif", ".tiff"}:
+        return head.startswith((b"II*\x00", b"MM\x00*"))
+    return True
+
+
 def create_document_router(
     analysis_service: Optional[Any] = None,
     max_upload_bytes: int = MAX_UPLOAD_BYTES,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["documents"])
     service = analysis_service if analysis_service is not None else AnalysisService()
+    job_store: Dict[str, Dict[str, Any]] = {}
+    idempotency_index: Dict[str, str] = {}
 
-    @router.post("/analyze", response_model=DocumentAuthSummary)
-    async def analyze_document_endpoint(file: UploadFile = File(...)) -> DocumentAuthSummary:
+    async def _save_validated_upload(file: UploadFile, prefix: str) -> tuple[Path, int]:
         if not file.filename:
             raise HTTPException(status_code=400, detail="Fayl ad? t?l?b olunur.")
 
@@ -29,14 +46,14 @@ def create_document_router(
         if ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f"D?st?kl?nm?y?n fayl format?: {ext or 'nam?lum'}.",
+                detail="D?st?kl?nm?y?n fayl format?.",
             )
 
         temp_dir = Path("tmp_uploads")
         temp_dir.mkdir(parents=True, exist_ok=True)
-        unique_name = f"upload_{uuid.uuid4().hex}{ext}"
-        temp_path = temp_dir / unique_name
+        temp_path = temp_dir / f"{prefix}_{uuid.uuid4().hex}{ext}"
         total_bytes = 0
+        header = b""
 
         try:
             with temp_path.open("wb") as out_file:
@@ -44,6 +61,9 @@ def create_document_router(
                     chunk = await file.read(CHUNK_SIZE)
                     if not chunk:
                         break
+                    if len(header) < 16:
+                        needed = 16 - len(header)
+                        header += chunk[:needed]
                     total_bytes += len(chunk)
                     if total_bytes > max_upload_bytes:
                         raise HTTPException(
@@ -51,95 +71,81 @@ def create_document_router(
                             detail="Fayl ?l??s? icaz? veril?n h?ddi ke?ir.",
                         )
                     out_file.write(chunk)
-
-            if total_bytes == 0:
-                raise HTTPException(status_code=400, detail="Y?kl?n?n fayl bo?dur.")
-
-            summary = service.analyze_summary(temp_path)
-            if isinstance(summary, DocumentAuthSummary):
-                return summary
-            if isinstance(summary, dict):
-                return DocumentAuthSummary.model_validate(summary)
-            raise HTTPException(
-                status_code=500,
-                detail="Analiz xidm?tind?n g?zl?nilm?y?n n?tic? qaytar?ld?.",
-            )
-        except HTTPException:
-            raise
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"S?n?d analizi zaman? x?ta ba? verdi: {exc}",
-            ) from exc
-        finally:
+        except Exception:
             if temp_path.exists():
                 try:
                     temp_path.unlink()
                 except OSError:
                     pass
+            raise
 
+        if total_bytes == 0:
+            temp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="Y?kl?n?n fayl bo?dur.")
 
-    idempotency_map: Dict[str, str] = {}
+        if not _validate_magic_bytes(ext, header):
+            temp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="Fayl m?zmunu uzant?ya uy?un deyil.")
+
+        return temp_path, total_bytes
+
+    @router.post("/analyze", response_model=DocumentAuthSummary)
+    @router.post("/analyze-file", response_model=DocumentAuthSummary, include_in_schema=False)
+    async def analyze_document_file_endpoint(file: UploadFile = File(...)) -> DocumentAuthSummary:
+        temp_path: Optional[Path] = None
+        try:
+            temp_path, _ = await _save_validated_upload(file, "upload")
+            summary = service.analyze_summary(temp_path)
+            if isinstance(summary, DocumentAuthSummary):
+                return summary
+            if isinstance(summary, dict):
+                return DocumentAuthSummary.model_validate(summary)
+            raise HTTPException(status_code=500, detail="S?n?d analizi icra edil? bilm?di.")
+        except HTTPException:
+            raise
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Fayl m?zmunu emal edil? bilm?di.")
+        except Exception:
+            raise HTTPException(status_code=500, detail="S?n?d analizi zaman? daxili x?ta ba? verdi.")
+        finally:
+            if temp_path is not None and temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
 
     @router.post("/jobs")
     async def create_analysis_job(
         file: UploadFile = File(...),
         idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        if idempotency_key and idempotency_key in idempotency_map:
-            existing_id = idempotency_map[idempotency_key]
-            return {"job_id": existing_id, "idempotent_replay": True, "status": "deduplicated"}
+        if idempotency_key and idempotency_key in idempotency_index:
+            existing_id = idempotency_index[idempotency_key]
+            existing = job_store.get(existing_id, {})
+            return {
+                "job_id": existing_id,
+                "idempotent_replay": True,
+                "status": existing.get("status", "completed"),
+                "result": existing.get("result"),
+            }
 
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="Fayl ad? t?l?b olunur.")
-
-        ext = Path(file.filename).suffix.lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"D?st?kl?nm?y?n fayl format?: {ext or 'nam?lum'}.",
-            )
-
-        temp_dir = Path("tmp_uploads")
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        unique_name = f"job_{uuid.uuid4().hex}{ext}"
-        temp_path = temp_dir / unique_name
-        total_bytes = 0
-
+        temp_path: Optional[Path] = None
         try:
-            with temp_path.open("wb") as out_file:
-                while True:
-                    chunk = await file.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    total_bytes += len(chunk)
-                    if total_bytes > max_upload_bytes:
-                        raise HTTPException(
-                            status_code=413,
-                            detail="Fayl ?l??s? icaz? veril?n h?ddi ke?ir.",
-                        )
-                    out_file.write(chunk)
-
-            if total_bytes == 0:
-                raise HTTPException(status_code=400, detail="Y?kl?n?n fayl bo?dur.")
-
+            temp_path, _ = await _save_validated_upload(file, "job")
             summary = service.analyze_summary(temp_path)
             job_id = uuid.uuid4().hex
             result_payload = summary.model_dump() if hasattr(summary, "model_dump") else dict(summary)
+            record = {"job_id": job_id, "status": "completed", "result": result_payload}
+            job_store[job_id] = record
             if idempotency_key:
-                idempotency_map[idempotency_key] = job_id
-            idempotency_map[f"__job__:{job_id}"] = result_payload  # type: ignore[assignment]
-            return {"job_id": job_id, "status": "completed", "result": result_payload}
+                idempotency_index[idempotency_key] = job_id
+            return record
         except HTTPException:
             raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Job icra x?tas?: {exc}") from exc
+        except Exception:
+            raise HTTPException(status_code=500, detail="Tap??r?q icra edil?rk?n daxili x?ta ba? verdi.")
         finally:
-            if temp_path.exists():
+            if temp_path is not None and temp_path.exists():
                 try:
                     temp_path.unlink()
                 except OSError:
@@ -147,10 +153,10 @@ def create_document_router(
 
     @router.get("/jobs/{job_id}")
     async def get_analysis_job(job_id: str) -> Dict[str, Any]:
-        stored = idempotency_map.get(f"__job__:{job_id}")
+        stored = job_store.get(job_id)
         if stored is None:
-            raise HTTPException(status_code=404, detail="Job tap?lmad?.")
-        return {"job_id": job_id, "status": "completed", "result": stored}
+            raise HTTPException(status_code=404, detail="Tap??r?q tap?lmad?.")
+        return stored
 
     return router
 
@@ -164,6 +170,10 @@ def create_app(
     @app.get("/health")
     async def health_check() -> Dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ready")
+    async def readiness_check() -> Dict[str, Any]:
+        return {"status": "ready"}
 
     app.include_router(create_document_router(analysis_service=analysis_service))
     attach_deepfake_router(app, pipeline_runner=deepfake_runner)

@@ -28,7 +28,7 @@ def _resolve_cascade_path(filename: str = "haarcascade_frontalface_default.xml")
     )
 
 
-def _load_face_cascade(filename: str = "haarcascade_frontalface_default.xml") -> cv2.CascadeClassifier:
+def _load_face_cascade(filename: str = "haarcascade_frontalface_default.xml") -> Any:
     cascade_path = _resolve_cascade_path(filename)
     cascade = cv2.CascadeClassifier(cascade_path)
     if cascade is None or cascade.empty():
