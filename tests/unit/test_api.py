@@ -5,12 +5,18 @@ import subprocess
 import sys
 import types
 
-from fastapi import HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.testclient import TestClient
 import pytest
 
 from doc_auth import api as doc_api
 from doc_auth.schemas.pipeline_schemas import DocumentAuthSummary
+
+
+def _router_client(router) -> TestClient:
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
 
 
 class _DummyService:
@@ -103,16 +109,16 @@ def test_document_router_and_app_endpoints(
     assert client.post("/v1/analyze", files={"file": ("doc.png", b"", "image/png")}).status_code == 400
     assert client.post("/v1/analyze", files={"file": ("doc.png", b"NOTPNG", "image/png")}).status_code == 400
 
-    small_client = TestClient(doc_api.create_document_router(analysis_service=svc, max_upload_bytes=10))
+    small_client = _router_client(doc_api.create_document_router(analysis_service=svc, max_upload_bytes=10))
     assert small_client.post("/v1/analyze", files={"file": ("doc.png", png_bytes, "image/png")}).status_code == 413
 
-    c_val = TestClient(doc_api.create_document_router(analysis_service=_DummyService(mode="raise_value")))
+    c_val = _router_client(doc_api.create_document_router(analysis_service=_DummyService(mode="raise_value")))
     assert c_val.post("/v1/analyze", files={"file": ("doc.png", png_bytes, "image/png")}).status_code == 400
 
-    c_rt = TestClient(doc_api.create_document_router(analysis_service=_DummyService(mode="raise_runtime")))
+    c_rt = _router_client(doc_api.create_document_router(analysis_service=_DummyService(mode="raise_runtime")))
     assert c_rt.post("/v1/analyze", files={"file": ("doc.png", png_bytes, "image/png")}).status_code == 500
 
-    c_bad = TestClient(doc_api.create_document_router(analysis_service=_DummyService(mode="bad_type")))
+    c_bad = _router_client(doc_api.create_document_router(analysis_service=_DummyService(mode="bad_type")))
     assert c_bad.post("/v1/analyze", files={"file": ("doc.png", png_bytes, "image/png")}).status_code == 500
 
     sample_file = tmp_path / "sample.png"
@@ -124,7 +130,7 @@ def test_document_router_and_app_endpoints(
     assert r_json_ok.json()["decision"] == "authentic"
 
     no_sum_svc = types.SimpleNamespace()
-    c_501 = TestClient(doc_api.create_document_router(analysis_service=no_sum_svc))
+    c_501 = _router_client(doc_api.create_document_router(analysis_service=no_sum_svc))
     assert c_501.post("/v1/analyze/json", json={"file_path": str(sample_file)}).status_code == 501
 
     assert client.get("/v1/jobs/unknown-id").status_code == 404
@@ -144,6 +150,6 @@ def test_document_router_and_app_endpoints(
         orig_unlink(self, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", _flaky_unlink)
-    c_job_err = TestClient(doc_api.create_document_router(analysis_service=_DummyService(mode="raise_runtime")))
+    c_job_err = _router_client(doc_api.create_document_router(analysis_service=_DummyService(mode="raise_runtime")))
     assert c_job_err.post("/v1/jobs", files={"file": ("doc.png", png_bytes, "image/png")}).status_code == 500
     monkeypatch.setattr(Path, "unlink", orig_unlink)
