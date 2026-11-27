@@ -240,3 +240,44 @@ def test_extract_pcm_rms_returns_none_on_zero_samples(
 
     analyzer = AudioLipSyncAnalyzer()
     assert analyzer._extract_pcm_rms(src_file) is None
+from pathlib import Path
+import subprocess
+import wave
+import pytest
+
+from doc_auth.deepfake import audio_analysis as aa_mod
+
+
+def test_extract_pcm_rms_returns_none_when_samples_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src_file = tmp_path / "sample.mp4"
+    src_file.write_bytes(b"video")
+
+    class _DummyProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    class _DummyWave:
+        def __enter__(self) -> "_DummyWave":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def getnframes(self) -> int:
+            return 1
+
+        def readframes(self, _n: int) -> bytes:
+            return b"\x00"
+
+    def _fake_run(cmd: list[str], **_kwargs: object) -> _DummyProc:
+        Path(cmd[-1]).write_bytes(b"RIFF")
+        return _DummyProc()
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    monkeypatch.setattr(wave, "open", lambda *_args, **_kwargs: _DummyWave())
+
+    analyzer = aa_mod.AudioLipSyncAnalyzer()
+    assert analyzer._extract_pcm_rms(src_file) is None
