@@ -270,7 +270,7 @@ def test_extract_pcm_rms_returns_none_when_samples_empty(
             return 1
 
         def readframes(self, _n: int) -> bytes:
-            return b"\x00"
+            return b"\x00\x00"
 
     def _fake_run(cmd: list[str], **_kwargs: object) -> _DummyProc:
         Path(cmd[-1]).write_bytes(b"RIFF")
@@ -278,6 +278,7 @@ def test_extract_pcm_rms_returns_none_when_samples_empty(
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
     monkeypatch.setattr(wave, "open", lambda *_args, **_kwargs: _DummyWave())
+    monkeypatch.setattr(np, "frombuffer", lambda *_args, **_kwargs: np.empty(0, dtype=np.int16))
 
     analyzer = aa_mod.AudioLipSyncAnalyzer()
     assert analyzer._extract_pcm_rms(src_file) is None
