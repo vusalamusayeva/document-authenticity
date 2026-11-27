@@ -103,3 +103,40 @@ def test_sample_video_frames_and_sampler_wrappers(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(fs_mod, "VideoStreamReader", lambda path, cfg: _FakeReader(boom_cap))
     with pytest.raises(VideoValidationError):
         list(sample_video_frames(dummy_video))
+from pathlib import Path
+from typing import Any
+import pytest
+
+from doc_auth.deepfake import frame_sampler as fs_mod
+from doc_auth.deepfake.exceptions import InvalidConfigError
+from doc_auth.deepfake.frame_sampler import sample_video_frames
+
+
+def test_sample_video_frames_reraises_invalid_config_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    video = tmp_path / "dummy.mp4"
+    video.write_bytes(b"fake")
+
+    class _DummyCap:
+        def get(self, _prop: int) -> float:
+            return 25.0
+
+        def read(self) -> tuple[bool, Any]:
+            raise InvalidConfigError("bad sampler runtime config")
+
+    class _DummyReader:
+        def __init__(self, _path: Any, _cfg: Any) -> None:
+            self.cap = _DummyCap()
+            self.metadata = {"fps": 25.0}
+
+        def __enter__(self) -> "_DummyReader":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+    monkeypatch.setattr(fs_mod, "VideoStreamReader", _DummyReader)
+
+    with pytest.raises(InvalidConfigError, match="bad sampler runtime config"):
+        list(sample_video_frames(video))
