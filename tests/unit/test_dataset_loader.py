@@ -1,44 +1,59 @@
 ﻿from pathlib import Path
-import inspect
 import pytest
-import cv2
-import numpy as np
 
 from doc_auth.ingestion.dataset_loader import DatasetLoader
 
 
-def _make_sample_image(img_path: Path) -> Path:
-    img = np.full((120, 160, 3), 240, dtype=np.uint8)
-    cv2.rectangle(img, (15, 15), (145, 105), (40, 40, 40), 2)
-    cv2.imwrite(str(img_path), img)
-    return img_path
+def test_dataset_loader_file_and_custom_extensions(tmp_path: Path) -> None:
+    doc = tmp_path / "passport.pdf"
+    doc.write_bytes(b"%PDF-1.4 sample")
+
+    custom_loader = DatasetLoader(allowed_extensions=["pdf", ".PNG"])
+    assert custom_loader.allowed_extensions == {".pdf", ".png"}
+
+    info = custom_loader.load_document(doc)
+    assert info["status"] == "success"
+    assert info["file_name"] == "passport.pdf"
+    assert info["extension"] == ".pdf"
+    assert info["size_bytes"] > 0
+    assert info["is_supported_extension"] is True
+
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("hello", encoding="utf-8")
+    u_info = custom_loader.load_document(unsupported)
+    assert u_info["is_supported_extension"] is False
+
+    assert custom_loader.load(doc)["file_name"] == "passport.pdf"
+    assert custom_loader.analyze(doc)["file_name"] == "passport.pdf"
+    assert custom_loader(doc)["file_name"] == "passport.pdf"
 
 
-def _call_with_path(fn, target_path: Path):
-    sig = inspect.signature(fn)
-    params = [p for name, p in sig.parameters.items() if name != "self"]
-    if not params:
-        return fn()
-    try:
-        return fn(target_path)
-    except TypeError:
-        return fn(str(target_path))
-
-
-def test_dataset_loader_methods_and_missing_file(tmp_path: Path) -> None:
+def test_dataset_loader_directory_and_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     loader = DatasetLoader()
-    assert loader is not None
+    dataset_dir = tmp_path / "batch"
+    dataset_dir.mkdir()
 
-    img_path = _make_sample_image(tmp_path / "doc.png")
-    for method_name in ("load_document", "load", "analyze", "__call__"):
-        method = getattr(loader, method_name, None)
-        if callable(method):
-            try:
-                res = _call_with_path(method, img_path)
-                assert res is not None
-            except Exception:
-                pass
+    f1 = dataset_dir / "a.png"
+    f1.write_bytes(b"png")
+    f2 = dataset_dir / "b.jpg"
+    f2.write_bytes(b"jpg")
+    ignored = dataset_dir / "ignore.csv"
+    ignored.write_text("a,b", encoding="utf-8")
 
-    missing = tmp_path / "nonexistent_file.png"
-    with pytest.raises(Exception):
-        _call_with_path(loader.load_document, missing)
+    result = loader.load(dataset_dir)
+    assert result["status"] == "success"
+    assert result["count"] == 2
+    assert [item["file_name"] for item in result["items"]] == ["a.png", "b.jpg"]
+
+    with pytest.raises(FileNotFoundError):
+        loader.load_document(tmp_path / "missing.pdf")
+
+    with pytest.raises(FileNotFoundError):
+        loader.load(tmp_path / "does_not_exist")
+
+    special = tmp_path / "special_obj"
+    special.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(Path, "is_file", lambda self: False if self == special else Path.is_file.__wrapped__(self) if hasattr(Path.is_file, "__wrapped__") else False)
+    monkeypatch.setattr(Path, "is_dir", lambda self: False if self == special else False)
+    with pytest.raises(ValueError):
+        loader.load(special)
