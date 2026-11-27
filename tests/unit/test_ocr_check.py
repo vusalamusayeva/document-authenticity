@@ -114,3 +114,28 @@ def test_ocr_checker_tesseract_invalid_conf_and_low_confidence(
     assert res["text"] == "LOW BADCONF"
     assert res["has_text"] is True
     assert res["suspicious"] is True
+import sys
+import types
+import numpy as np
+import pytest
+
+from doc_auth.ocr.ocr_check import OCRChecker
+
+
+def test_run_easyocr_skips_empty_text_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeReader:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def readtext(self, _gray: np.ndarray) -> list[tuple[object, str, float]]:
+            return [([[0, 0], [10, 0], [10, 10], [0, 10]], "   ", 0.9)]
+
+    fake_easyocr = types.ModuleType("easyocr")
+    fake_easyocr.Reader = _FakeReader  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "easyocr", fake_easyocr)
+
+    checker = OCRChecker()
+    out = checker._run_easyocr(np.zeros((20, 20), dtype=np.uint8))
+    assert out["engine"] == "easyocr"
+    assert out["text"] == ""
+    assert out["fields"] == []
