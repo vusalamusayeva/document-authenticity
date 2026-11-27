@@ -156,3 +156,12 @@ def test_visual_detector_load_model_fallback_when_torch_none(
     detector = VisualDetector(checkpoint_path=ckpt)
     with pytest.raises(ModelUnavailableError):
         detector.load_model()
+
+
+def test_visual_detector_load_model_unsupported_suffix(tmp_path: Path) -> None:
+    ckpt = tmp_path / "model.onnx"
+    ckpt.write_bytes(b"onnx-weights")
+
+    detector = VisualDetector(checkpoint_path=ckpt)
+    with pytest.raises(ModelUnavailableError):
+        detector.load_model()
