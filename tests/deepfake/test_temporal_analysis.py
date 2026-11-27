@@ -69,15 +69,21 @@ def test_temporal_analyzer_no_data_time_gap_and_high_jumps() -> None:
     assert res["status"] == "success"
     assert res["high_jumps"] == 1
     assert res["scene_cuts_ignored"] == 1
-from doc_auth.deepfake.temporal_analysis import compute_iou
+import pytest
+from doc_auth.deepfake import temporal_analysis as ta_mod
 
 
-class _ZeroUnionFloat(float):
-    def __sub__(self, other: object) -> float:
-        return 0.0
+def test_compute_iou_returns_zero_when_union_area_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+    orig_max = max
 
+    def _fake_max(*args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        if calls["n"] > 2:
+            return 0.0
+        return orig_max(*args, **kwargs)
 
-def test_compute_iou_returns_zero_when_union_area_is_zero() -> None:
-    box_a = [_ZeroUnionFloat(0.0), _ZeroUnionFloat(0.0), _ZeroUnionFloat(2.0), _ZeroUnionFloat(2.0)]
-    box_b = [0.0, 0.0, 2.0, 2.0]
-    assert compute_iou(box_a, box_b) == 0.0
+    monkeypatch.setattr(ta_mod, "max", _fake_max, raising=False)
+    assert ta_mod.compute_iou([0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 2.0, 2.0]) == 0.0
