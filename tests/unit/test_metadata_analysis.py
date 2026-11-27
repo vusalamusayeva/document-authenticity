@@ -1,7 +1,10 @@
-﻿from pathlib import Path
+﻿import os
+from pathlib import Path
 from typing import Any
 
 import fitz  # type: ignore
+import PIL.ExifTags as pil_exif
+import PIL.Image as pil_image
 import pytest
 from PIL import Image, PngImagePlugin
 
@@ -16,6 +19,30 @@ def test_metadata_analyzer_invalid_chunk_size_and_missing_file(tmp_path: Path) -
     missing_res = analyzer.analyze(tmp_path / "missing.pdf")
     assert missing_res["status"] == "not_found"
     assert missing_res["suspicious"] is None
+
+
+def test_metadata_analyzer_signals_and_wrappers(tmp_path: Path) -> None:
+    # Zero-byte file and missing extension
+    zero_no_ext = tmp_path / "raw_empty"
+    zero_no_ext.write_bytes(b"")
+
+    analyzer = MetadataAnalyzer()
+    res = analyzer.analyze({"path": str(zero_no_ext)})
+    assert res["status"] == "success"
+    assert res["size_bytes"] == 0
+    assert res["extension"] == ""
+    assert res["suspicious"] is True
+    assert res["metadata_present"] is False
+    assert any("0 bayt" in r for r in res["reasons"])
+    assert any("genişlənməsi" in r or "extension" in r.lower() for r in res["reasons"])
+
+    # Modified timestamp earlier than created timestamp
+    dated_file = tmp_path / "dated.bin"
+    dated_file.write_bytes(b"hello")
+    os.utime(dated_file, (1_000_000_000, 1_000_000_000))
+    dated_res = analyzer.analyze(dated_file)
+    assert dated_res["suspicious"] is True
+    assert any("Modifikasiya vaxtı" in r for r in dated_res["reasons"])
 
 
 def test_metadata_analyzer_image_info_and_exif_editor_marker(tmp_path: Path) -> None:
@@ -37,7 +64,6 @@ def test_metadata_analyzer_image_info_and_exif_editor_marker(tmp_path: Path) -> 
 
 
 def test_metadata_analyzer_exif_dict_and_pdf_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # Simulate PIL Image with Exif tags including Software & raw bytes
     img_path = tmp_path / "exif_img.jpg"
     img_path.write_bytes(b"\xff\xd8\xff\xd9")
 
@@ -49,7 +75,7 @@ def test_metadata_analyzer_exif_dict_and_pdf_metadata(monkeypatch: pytest.Monkey
         format = "JPEG"
         mode = "RGB"
         size = (30, 20)
-        info: dict[str, Any] = {"comment": "ok", "exif": b"raw-bytes"}
+        info: dict[str, Any] = {"comment": "ok", "count": 3, "ratio": 1.5, "flag": True, "exif": b"raw-bytes"}
 
         def __enter__(self) -> "_FakeImg":
             return self
@@ -60,16 +86,17 @@ def test_metadata_analyzer_exif_dict_and_pdf_metadata(monkeypatch: pytest.Monkey
         def getexif(self) -> _FakeExif:
             return _FakeExif({305: "GIMP 2.10", 271: b"\x00\x01"})
 
-    import PIL.Image as pil_image
-    import PIL.ExifTags as pil_exif
-
     monkeypatch.setattr(pil_image, "open", lambda p: _FakeImg())
-    monkeypatch.setattr(pil_exif.TAGS, "get", lambda tag_id, default=None: {305: "Software", 271: "Make"}.get(tag_id, default))
+    monkeypatch.setitem(pil_exif.TAGS, 305, "Software")
+    monkeypatch.setitem(pil_exif.TAGS, 271, "Make")
 
     analyzer = MetadataAnalyzer()
     img_res = analyzer.inspect(img_path)
     assert img_res["status"] == "success"
+    assert img_res["metadata"]["comment"] == "ok"
+    assert img_res["metadata"]["count"] == 3
     assert img_res["metadata"]["exif"]["Software"] == "GIMP 2.10"
+    assert "Make" not in img_res["metadata"]["exif"]
     assert img_res["suspicious"] is True
 
     # PDF metadata via PyMuPDF
