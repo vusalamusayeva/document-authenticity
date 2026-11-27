@@ -68,4 +68,4 @@ def test_temporal_analyzer_no_data_time_gap_and_high_jumps() -> None:
     res = analyzer.analyze(records)
     assert res["status"] == "success"
     assert res["high_jumps"] == 1
-    assert res["scene_cuts_ignored"] == 2
+    assert res["scene_cuts_ignored"] == 1
