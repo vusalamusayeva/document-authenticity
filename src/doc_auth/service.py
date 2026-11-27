@@ -102,8 +102,9 @@ class AnalysisService:
         ingested: dict[str, Any] | None = None,
         document_path: Path | None = None,
     ) -> dict[str, Any]:
+        ingested_dict: dict[str, Any] = ingested if isinstance(ingested, dict) else {}
         payload: Any = None
-        for container in (detected, ingested or {}):
+        for container in (detected, ingested_dict):
             if isinstance(container, dict):
                 for key in ("image", "frame", "array", "aligned_image", "page_image"):
                     if key in container and container[key] is not None:
@@ -112,8 +113,9 @@ class AnalysisService:
             if payload is not None:
                 break
 
-        if payload is None and isinstance((ingested or {}).get("pages"), list) and len(ingested["pages"]) > 0:
-            first_page = ingested["pages"][0]
+        pages_raw = ingested_dict.get("pages")
+        if payload is None and isinstance(pages_raw, list) and len(pages_raw) > 0:
+            first_page = pages_raw[0]
             if isinstance(first_page, dict):
                 for key in ("image", "frame", "array"):
                     if key in first_page and first_page[key] is not None:
@@ -187,7 +189,8 @@ class AnalysisService:
         raw = self.analyze(document_path)
         checks: list[ArtifactCheckResult] = []
         for mod_name in ("ingestion", "detection", "metadata", "ocr", "classification", "forensics"):
-            mod_res = raw.get(mod_name) if isinstance(raw.get(mod_name), dict) else {}
+            raw_mod = raw.get(mod_name)
+            mod_res: dict[str, Any] = raw_mod if isinstance(raw_mod, dict) else {}
             sanitized_details = _sanitize_for_json(mod_res)
             checks.append(
                 ArtifactCheckResult(
@@ -198,7 +201,8 @@ class AnalysisService:
                     details=sanitized_details if isinstance(sanitized_details, dict) else {"value": sanitized_details},
                 )
             )
-        decision = raw.get("decision") if isinstance(raw.get("decision"), dict) else {}
+        raw_decision = raw.get("decision")
+        decision: dict[str, Any] = raw_decision if isinstance(raw_decision, dict) else {}
         risk_val = decision.get("risk_score")
         return DocumentAuthSummary(
             request_id=Path(document_path).name,
