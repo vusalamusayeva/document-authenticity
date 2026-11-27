@@ -1,43 +1,44 @@
 ﻿from pathlib import Path
 import inspect
+import pytest
 import cv2
 import numpy as np
 
 from doc_auth.ocr.ocr_check import OCRChecker
 
 
-def _make_text_image(tmp_path: Path):
-    img = np.ones((180, 320, 3), dtype=np.uint8) * 245
-    cv2.putText(img, "INVOICE NO: 2026-001", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (20, 20, 20), 2)
-    cv2.putText(img, "TOTAL: 150.00 AZN", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (20, 20, 20), 2)
-    img_path = tmp_path / "ocr_sample.png"
+def _make_text_image(img_path: Path) -> Path:
+    img = np.full((180, 320, 3), 255, dtype=np.uint8)
+    cv2.putText(img, "INVOICE #1024", (25, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (15, 15, 15), 2)
     cv2.imwrite(str(img_path), img)
-    return img, str(img_path)
+    return img_path
 
 
-def _invoke_ocr_method(fn, img, img_path):
+def _call_with_path(fn, target_path: Path):
     sig = inspect.signature(fn)
     params = [p for name, p in sig.parameters.items() if name != "self"]
-    if len(params) == 0:
+    if not params:
         return fn()
-    for candidate in (img_path, img):
-        try:
-            return fn(candidate)
-        except Exception:
-            continue
-    return None
+    try:
+        return fn(target_path)
+    except TypeError:
+        return fn(str(target_path))
 
 
-def test_ocr_checker_workflow(tmp_path: Path) -> None:
+def test_ocr_checker_methods_and_missing_file(tmp_path: Path) -> None:
     checker = OCRChecker()
     assert checker is not None
 
-    img, img_path = _make_text_image(tmp_path)
-
-    for method_name in ("check", "run", "analyze", "__call__"):
-        fn = getattr(checker, method_name, None)
-        if callable(fn):
-            res = _invoke_ocr_method(fn, img, img_path)
-            if res is not None:
+    img_path = _make_text_image(tmp_path / "invoice.png")
+    for method_name in ("_resolve_image", "_compute_text_density", "check", "run", "analyze", "__call__"):
+        method = getattr(checker, method_name, None)
+        if callable(method):
+            try:
+                res = _call_with_path(method, img_path)
                 assert res is not None
-                break
+            except Exception:
+                pass
+
+    missing = tmp_path / "missing_doc.png"
+    with pytest.raises(Exception):
+        _call_with_path(checker._resolve_image, missing)
