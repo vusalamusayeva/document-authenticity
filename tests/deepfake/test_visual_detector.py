@@ -172,9 +172,18 @@ def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch, tmp_path):
     from doc_auth.deepfake import visual_detector as vd_mod
     from doc_auth.deepfake.exceptions import ModelUnavailableError
 
+    class _DummyTorch:
+        @staticmethod
+        def load(_path, map_location=None):
+            return {}
+
+    class _DummyNN:
+        Module = object
+
+    monkeypatch.setattr(vd_mod, "torch", _DummyTorch())
+    monkeypatch.setattr(vd_mod, "nn", _DummyNN())
     assert vd_mod.nn is not None
     missing_ckpt = tmp_path / "nonexistent_weights.pt"
     det = vd_mod.VisualDeepfakeDetector(checkpoint_path=str(missing_ckpt))
-    monkeypatch.setattr(vd_mod, "torch", None)
     with pytest.raises(ModelUnavailableError):
         det.load()

@@ -27,5 +27,5 @@ def test_orb_similarity_when_orb_unavailable(monkeypatch):
     img1 = np.ones((120, 120, 3), dtype=np.uint8) * 255
     img2 = np.ones((120, 120, 3), dtype=np.uint8) * 255
     monkeypatch.setattr(cv2, "ORB_create", None, raising=False)
-    score = SignatureSimilarity.calculate_orb_similarity(img1, img2)
+    score = SignatureSimilarity.calculate_orb_matching(img1, img2)
     assert score == 0.0

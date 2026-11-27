@@ -28,4 +28,4 @@ def test_stamp_analysis_reraises_stamp_error(monkeypatch):
 
     monkeypatch.setattr(sa_mod.cv2, "findContours", _boom_contours)
     with pytest.raises(StampAnalysisError, match="domain stamp failure"):
-        sa_mod.analyze_stamp_region(img)
+        sa_mod.analyze_stamp(img)
