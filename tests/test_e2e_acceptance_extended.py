@@ -1,3 +1,5 @@
+import pytest
+from pathlib import Path
 import io
 from PIL import Image
 from fastapi.testclient import TestClient
@@ -60,3 +62,22 @@ def test_job_endpoint_and_idempotency():
     status_resp = client.get(f"/v1/jobs/{job_id}")
     assert status_resp.status_code == 200
     assert status_resp.json()["status"] == "completed"
+
+
+def test_tampered_sample_analyze_endpoint() -> None:
+    sample_path = Path("outputs/e2e_samples/tampered_az_scan_test.png")
+    if not sample_path.exists():
+        pytest.skip("tampered_az_scan_test.png sample not present")
+
+    app = create_app()
+    client = TestClient(app)
+    with open(sample_path, "rb") as f:
+        resp = client.post("/v1/analyze", files={"file": (sample_path.name, f, "image/png")})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "overall_risk_score" in body
+    assert body.get("decision") in {"authentic", "suspicious", "tampered", "review", "inconclusive"}
+    modules = {c.get("module"): c for c in body.get("checks", [])}
+    assert "classification" in modules
+    assert "forensics" in modules

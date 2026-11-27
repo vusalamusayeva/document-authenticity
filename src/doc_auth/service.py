@@ -62,7 +62,18 @@ class AnalysisService:
         self.detector = detector if detector is not None else DocumentDetector()
         self.metadata_analyzer = metadata_analyzer if metadata_analyzer is not None else MetadataAnalyzer()
         self.ocr_checker = ocr_checker if ocr_checker is not None else OCRChecker()
-        self.classifier = classifier if classifier is not None else DocumentClassifier()
+        if classifier is not None:
+            self.classifier = classifier
+        else:
+            import os
+            model_path = Path(os.getenv("DOC_AUTH_CLASSIFIER_PATH", "models/document_classifier.pkl"))
+            if model_path.exists() and model_path.is_file() and hasattr(DocumentClassifier, "load"):
+                try:
+                    self.classifier = DocumentClassifier.load(str(model_path))
+                except Exception:
+                    self.classifier = DocumentClassifier()
+            else:
+                self.classifier = DocumentClassifier()
         self.tampering_detector = tampering_detector if tampering_detector is not None else TamperingDetector()
         self.decision_model = decision_model if decision_model is not None else DecisionModel()
         self.explainer = explainer if explainer is not None else _default_explainer()

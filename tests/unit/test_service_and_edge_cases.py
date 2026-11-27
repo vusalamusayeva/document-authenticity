@@ -42,3 +42,32 @@ def test_inconclusive_risk_when_visual_missing() -> None:
     assert res["risk_score"] is None
     assert res["overall_risk_score"] is None
     assert res["is_suspicious"] is None
+
+def test_document_classifier_save_load_and_auto_service(tmp_path: Path) -> None:
+    from doc_auth.classification.document_classifier import DocumentClassifier
+
+    base = np.ones((160, 240, 3), dtype=np.uint8) * 240
+    cv2.rectangle(base, (20, 20), (220, 140), (30, 30, 30), 2)
+    cv2.putText(base, "SAMPLE DOC", (35, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (10, 10, 10), 2)
+
+    clf = DocumentClassifier()
+    clf.fit(
+        [
+            base,
+            cv2.convertScaleAbs(base, alpha=1.1, beta=8),
+            base[15:145, 20:220],
+            cv2.flip(base, 1),
+        ],
+        ["full_scan", "full_scan", "cropped_scan", "mirrored_scan"],
+    )
+    pkl_path = tmp_path / "classifier.pkl"
+    clf.save(str(pkl_path))
+    assert pkl_path.exists()
+
+    loaded = DocumentClassifier.load(str(pkl_path))
+    assert getattr(loaded, "_is_fitted", False) is True
+
+    default_model = Path("models/document_classifier.pkl")
+    if default_model.exists():
+        svc = AnalysisService()
+        assert getattr(svc.classifier, "_is_fitted", False) is True

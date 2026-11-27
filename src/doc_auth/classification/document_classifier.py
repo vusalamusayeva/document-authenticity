@@ -256,3 +256,20 @@ class DocumentClassifier(BaseDocModel):
             "confidence": round(best_conf, 4),
             "probabilities": prob_map,
         }
+
+    def save(self, path: str) -> None:
+        import pickle
+        out_path = Path(path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "wb") as f:
+            pickle.dump(self, f)
+
+    @classmethod
+    def load(cls, path: str) -> "DocumentClassifier":
+        import pickle
+        with open(path, "rb") as f:
+            obj = pickle.load(f)
+        if not isinstance(obj, cls):
+            raise TypeError(f"G?zl?nil?n tip {cls.__name__}, al?nd?: {type(obj).__name__}")
+        return obj
+
