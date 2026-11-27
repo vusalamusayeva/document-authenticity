@@ -74,13 +74,14 @@ def test_analyze_upload_size_empty_and_magic_byte_errors(tmp_path) -> None:
 
 
 def test_v1_analyze_single_post_and_openapi_examples() -> None:
+    test_app = create_app()
     post_analyze_routes = [
-        r for r in app.routes
+        r for r in test_app.routes
         if getattr(r, "path", None) == "/v1/analyze" and "POST" in getattr(r, "methods", set())
     ]
     assert len(post_analyze_routes) == 1
 
-    schema = app.openapi()
+    schema = test_app.openapi()
     json_post = schema["paths"]["/v1/analyze/json"]["post"]
     examples = json_post["requestBody"]["content"]["application/json"]["examples"]
     assert "file_path_request" in examples
