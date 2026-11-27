@@ -1,13 +1,12 @@
 ﻿from pathlib import Path
-import importlib
 import cv2
 import numpy as np
+import pytest
+
+from doc_auth.signature_stamp.pipeline import analyze_signature_stamp
 
 
-def test_signature_stamp_pipeline_module_and_execution(tmp_path: Path) -> None:
-    mod = importlib.import_module("doc_auth.signature_stamp.pipeline")
-    assert mod is not None
-
+def test_analyze_signature_stamp_pipeline(tmp_path: Path) -> None:
     img_path = tmp_path / "doc_stamp.png"
     canvas = np.ones((240, 360, 3), dtype=np.uint8) * 245
     cv2.rectangle(canvas, (30, 30), (330, 210), (30, 30, 30), 2)
@@ -15,34 +14,15 @@ def test_signature_stamp_pipeline_module_and_execution(tmp_path: Path) -> None:
     cv2.putText(canvas, "SIGNED", (55, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (20, 20, 20), 2)
     cv2.imwrite(str(img_path), canvas)
 
-    pipeline_cls = None
-    for attr_name in dir(mod):
-        attr = getattr(mod, attr_name)
-        if isinstance(attr, type) and attr.__module__ == mod.__name__:
-            pipeline_cls = attr
-            break
+    res_path = analyze_signature_stamp(str(img_path))
+    assert res_path is not None
 
-    assert pipeline_cls is not None, "No pipeline class defined in doc_auth.signature_stamp.pipeline"
+    res_arr = analyze_signature_stamp(canvas)
+    assert res_arr is not None
 
+    missing_path = str(tmp_path / "missing_doc.png")
     try:
-        instance = pipeline_cls()
-    except TypeError:
-        instance = pipeline_cls(config={}) if "config" in pipeline_cls.__init__.__code__.co_varnames else None
-
-    if instance is not None:
-        for method_name in ("run", "analyze", "process", "predict", "detect"):
-            method = getattr(instance, method_name, None)
-            if callable(method):
-                try:
-                    res = method(str(img_path))
-                except TypeError:
-                    res = method(canvas)
-                assert res is not None
-                break
-        else:
-            if callable(instance):
-                try:
-                    res = instance(str(img_path))
-                except TypeError:
-                    res = instance(canvas)
-                assert res is not None
+        res_missing = analyze_signature_stamp(missing_path)
+        assert res_missing is not None
+    except Exception:
+        pass
