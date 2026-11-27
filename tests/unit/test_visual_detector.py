@@ -267,3 +267,65 @@ def test_visual_detector_torch_checkpoint_and_missing_weights_error(
     det5 = VisualDetector(checkpoint_path=pt_path)
     with pytest.raises(ModelUnavailableError):
         det5.load_model()
+from pathlib import Path
+import numpy as np
+import pytest
+
+from doc_auth.deepfake import visual_detector as vd_mod
+from doc_auth.deepfake.exceptions import ModelUnavailableError
+from doc_auth.deepfake.visual_detector import VisualDetector
+
+
+@pytest.mark.skipif(vd_mod.torch is None or vd_mod.nn is None, reason="PyTorch required")
+def test_visual_detector_torch_module_and_state_dict(tmp_path: Path) -> None:
+    torch = vd_mod.torch
+    nn = vd_mod.nn
+
+    class _TinyNet(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fc = nn.Linear(4, 1)
+
+        def forward(self, x):
+            return self.fc(x)
+
+    pt_file = tmp_path / "model.pt"
+    torch.save(_TinyNet(), pt_file)
+
+    det = VisualDetector(checkpoint_path=pt_file)
+    info = det.load_model()
+    assert info["status"] == "loaded"
+    assert info["backend"] == "torch_checkpoint"
+    # Second call hits cached _model branch
+    info_cached = det.load_model()
+    assert info_cached["backend"] == "torch_checkpoint"
+
+    # _compute_region_score raises ModelUnavailableError when only _model is set
+    with pytest.raises(ModelUnavailableError):
+        det._compute_region_score(np.zeros((16, 16, 3), dtype=np.uint8))
+
+    # state_dict with "module." prefix
+    pth_file = tmp_path / "weights.pth"
+    torch.save({"state_dict": {"module.fc.weight": torch.ones((1, 4))}}, pth_file)
+    det_sd = VisualDetector(checkpoint_path=pth_file)
+    sd_info = det_sd.load_model()
+    assert sd_info["backend"] == "torch_checkpoint"
+    assert "fc.weight" in det_sd._model
+
+    # Invalid state_dict (empty dict)
+    bad_sd_file = tmp_path / "empty_sd.pth"
+    torch.save({"state_dict": {}}, bad_sd_file)
+    with pytest.raises(ModelUnavailableError):
+        VisualDetector(checkpoint_path=bad_sd_file).load_model()
+
+    # Unsupported object inside checkpoint (e.g., plain list)
+    bad_obj_file = tmp_path / "list_ckpt.pth"
+    torch.save([1, 2, 3], bad_obj_file)
+    with pytest.raises(ModelUnavailableError):
+        VisualDetector(checkpoint_path=bad_obj_file).load_model()
+
+    # Corrupted torch file raises ModelUnavailableError during torch.load
+    corrupt_file = tmp_path / "corrupt.pt"
+    corrupt_file.write_bytes(b"not-a-valid-pytorch-archive")
+    with pytest.raises(ModelUnavailableError):
+        VisualDetector(checkpoint_path=corrupt_file).load_model()
