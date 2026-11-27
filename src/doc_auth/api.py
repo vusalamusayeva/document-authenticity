@@ -35,7 +35,7 @@ def check_readiness_state(service_obj: Any, required_langs: tuple[str, ...] = ("
                 installed_langs = [
                     ln.strip() for ln in proc.stdout.splitlines()[1:] if ln.strip()
                 ]
-        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
+        except (OSError, _sp.SubprocessError, ValueError, RuntimeError):
             installed_langs = []
     else:
         try:

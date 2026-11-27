@@ -233,6 +233,8 @@ def analyze_signature_stamp(
             errors=errors,
         )
 
+    except SignatureStampError:
+        raise
     except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
         errors.append(str(exc))
         return SignatureStampResult(
