@@ -88,3 +88,36 @@ def test_quality_dict_blur_brightness_and_run_quality_check() -> None:
     assert full_res["status"] == "passed"
     assert full_res["passed"] is True
     assert full_res["processed_shape"] == [64, 64]
+import numpy as np
+import pytest
+
+from doc_auth.preprocessing import quality_check as qc
+from doc_auth.preprocessing.quality_check import _QualityDict, preprocess_image, run_quality_check
+
+
+def test_quality_check_deskew_negative_45_and_quality_dict_iter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    img = np.full((80, 120, 3), 255, dtype=np.uint8)
+    img[35:45, 20:100] = 0
+
+    monkeypatch.setattr(
+        qc.cv2,
+        "minAreaRect",
+        lambda _pts: ((60.0, 40.0), (80.0, 10.0), -60.0),
+    )
+    out = preprocess_image(
+        img,
+        config={"grayscale": True, "denoise": False, "contrast": False, "deskew": True, "binarization": False},
+    )
+    assert out.shape == (80, 120)
+
+    qd = _QualityDict({"passed": True, "other": 1})
+    assert qd.is_acceptable is True
+    assert list(qd) == ["passed", "other"]
+
+    q_res = run_quality_check(
+        img,
+        config={"denoise": False, "contrast": False, "deskew": False, "binarization": False},
+    )
+    assert "status" in list(q_res)
