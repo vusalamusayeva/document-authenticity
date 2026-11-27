@@ -47,5 +47,7 @@ def analyze_texture(image: np.ndarray, bbox: tuple[int, int, int, int] | None = 
             "digital_manipulation_probability": float(forgery_probability)
         }
 
-    except Exception as e:
-        raise SignatureStampError(f"Doku analizi zamanı xəta: {e!s}")
+    except SignatureStampError:
+        raise
+    except (ValueError, TypeError, ArithmeticError, cv2.error) as e:
+        raise SignatureStampError(f"Doku analizi zaman? x?ta: {e!s}") from e
