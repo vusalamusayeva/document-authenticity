@@ -201,3 +201,42 @@ def test_audio_analyze_invalid_video_and_audio_durations(
     assert res["video_duration"] is None
     assert res["audio_duration"] is None
     assert res["duration_diff"] is None
+from pathlib import Path
+import subprocess
+from typing import Any
+import wave
+import pytest
+
+from doc_auth.deepfake import audio_analysis as aa_mod
+from doc_auth.deepfake.audio_analysis import AudioLipSyncAnalyzer
+
+
+def test_extract_pcm_rms_returns_none_on_zero_samples(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    src_file = tmp_path / "silent.mp4"
+    src_file.write_bytes(b"video")
+
+    class _ZeroWave:
+        def __enter__(self) -> "_ZeroWave":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def getnframes(self) -> int:
+            return 0
+
+        def readframes(self, _n: int) -> bytes:
+            return b"\x00\x00"
+
+    def _fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        out_wav = Path(cmd[-1])
+        out_wav.write_bytes(b"RIFF0000WAVEfmt ")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(aa_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(wave, "open", lambda *_a, **_kw: _ZeroWave())
+
+    analyzer = AudioLipSyncAnalyzer()
+    assert analyzer._extract_pcm_rms(src_file) is None
