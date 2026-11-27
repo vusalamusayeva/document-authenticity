@@ -183,7 +183,7 @@ def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch, tmp_path):
     monkeypatch.setattr(vd_mod, "torch", _DummyTorch())
     monkeypatch.setattr(vd_mod, "nn", _DummyNN())
     assert vd_mod.nn is not None
-    missing_ckpt = tmp_path / "nonexistent_weights.pt"
+    missing_ckpt = tmp_path / "nonexistent_ckpt.onnx"
     det = vd_mod.VisualDetector(checkpoint_path=str(missing_ckpt))
     with pytest.raises(ModelUnavailableError):
-        det.load()
+        det.verify_model_weights()
