@@ -169,3 +169,45 @@ def test_analyze_endpoint_status_codes_and_edge_cases(monkeypatch: pytest.Monkey
     )
     assert TestClient(app_500).post("/deepfake/analyze", files={"file": ("a.mp4", b"abc", "video/mp4")}).status_code == 500
     monkeypatch.setattr(Path, "unlink", orig_unlink)
+from pathlib import Path
+from typing import Any
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+import pytest
+
+from doc_auth.deepfake import api as df_api
+from doc_auth.deepfake.exceptions import ModelUnavailableError
+
+
+def test_deepfake_readiness_ready_and_default_runner_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    app_ready = FastAPI()
+    df_api.attach_deepfake_router(app_ready, pipeline_runner=lambda _p: {"status": "ok"})
+    client_ready = TestClient(app_ready)
+    r_ready = client_ready.get("/deepfake/readiness")
+    assert r_ready.status_code == 200
+    assert r_ready.json()["ready"] is True
+
+    def _boom_build(**_kwargs: Any) -> Any:
+        raise RuntimeError("model file missing")
+
+    monkeypatch.setattr(df_api, "build_deepfake_pipeline_from_config", _boom_build)
+    router_unavail = df_api.create_deepfake_router(pipeline_runner=None)
+    app_unavail = FastAPI()
+    app_unavail.include_router(router_unavail)
+    client_unavail = TestClient(app_unavail)
+
+    assert client_unavail.get("/deepfake/readiness").status_code == 503
+    sample = tmp_path / "clip.mp4"
+    sample.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    with pytest.raises(ModelUnavailableError):
+        router_unavail.state["pipeline"]  # ensure state is accessible
+        endpoint = next(
+            r.endpoint for r in router_unavail.routes if getattr(r, "path", None) == "/deepfake/analyze"
+        )
+        # Call default runner directly via closure inspection
+        for cell in endpoint.__closure__ or ():
+            if callable(cell.cell_contents) and getattr(cell.cell_contents, "__name__", "") == "_default_runner":
+                cell.cell_contents(sample)
+                break
