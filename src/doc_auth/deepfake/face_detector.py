@@ -1,14 +1,17 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 import cv2
 import numpy as np
+
 from doc_auth.deepfake.exceptions import ModelUnavailableError
 
 
 def _resolve_cascade_path(filename: str = "haarcascade_frontalface_default.xml") -> str:
-    search_dirs: List[Path] = []
+    search_dirs: list[Path] = []
 
-    haarcascades_dir = getattr(cv2.data, "haarcascades", None)
+    cv2_data = getattr(cv2, "data", None)
+    haarcascades_dir = getattr(cv2_data, "haarcascades", None) if cv2_data is not None else None
     if haarcascades_dir:
         search_dirs.append(Path(haarcascades_dir))
 
@@ -16,7 +19,7 @@ def _resolve_cascade_path(filename: str = "haarcascade_frontalface_default.xml")
     if cv2_data_fallback not in search_dirs:
         search_dirs.append(cv2_data_fallback)
 
-    checked: List[str] = []
+    checked: list[str] = []
     for base_dir in search_dirs:
         candidate = base_dir / filename
         checked.append(str(candidate))
@@ -38,7 +41,7 @@ def _load_face_cascade(filename: str = "haarcascade_frontalface_default.xml") ->
     return cascade
 
 
-def detect_faces(frame: np.ndarray) -> List[Dict[str, Any]]:
+def detect_faces(frame: np.ndarray) -> list[dict[str, Any]]:
     if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
         return []
 
@@ -69,7 +72,7 @@ def detect_faces(frame: np.ndarray) -> List[Dict[str, Any]]:
         minSize=(30, 30),
     )
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for (x, y, fw, fh) in faces:
         x_min, y_min = max(0, int(x)), max(0, int(y))
         x_max, y_max = min(w, int(x + fw)), min(h, int(y + fh))
@@ -85,7 +88,7 @@ def detect_faces(frame: np.ndarray) -> List[Dict[str, Any]]:
 
 
 class FaceDetector:
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: str | None = None):
         self.model_path = model_path
 
     def verify_model_weights(self) -> bool:
@@ -94,11 +97,11 @@ class FaceDetector:
         _load_face_cascade("haarcascade_frontalface_default.xml")
         return True
 
-    def detect_faces(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    def detect_faces(self, frame: np.ndarray) -> list[dict[str, Any]]:
         return detect_faces(frame)
 
-    def detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    def detect(self, frame: np.ndarray) -> list[dict[str, Any]]:
         return detect_faces(frame)
 
-    def __call__(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    def __call__(self, frame: np.ndarray) -> list[dict[str, Any]]:
         return detect_faces(frame)

@@ -64,10 +64,7 @@ class AnalysisService:
             if self.pipeline is not None and hasattr(self.pipeline, "run"):
                 raw_result = self.pipeline.run(str(tmp_path))
             else:
-                raw_result = self.core_service.analyze_document(
-                    file_path=str(tmp_path),
-                    filename=f"upload{suffix}",
-                )
+                raw_result = self.core_service.analyze(str(tmp_path))
         finally:
             if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)

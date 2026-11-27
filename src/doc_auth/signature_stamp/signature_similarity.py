@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from .exceptions import SignatureStampError
+
 
 class SignatureSimilarity:
 
@@ -72,7 +72,10 @@ class SignatureSimilarity:
         try:
             i1, i2 = cls._resize_and_mask(img1, img2)
             
-            orb = cv2.ORB_create()
+            orb_factory = getattr(cv2, "ORB_create", None)
+            if not callable(orb_factory):
+                return 0.0
+            orb = orb_factory()
             kp1, des1 = orb.detectAndCompute(i1, None)
             kp2, des2 = orb.detectAndCompute(i2, None)
             
