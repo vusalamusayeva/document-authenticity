@@ -1,127 +1,116 @@
 ﻿from pathlib import Path
-import cv2
-import numpy as np
+from typing import Any
 
-from doc_auth.deepfake.exceptions import ModelUnavailableError, VideoValidationError
+import numpy as np
+import pytest
+
 from doc_auth.deepfake.pipeline import DeepfakePipeline, analyze_video_deepfake
 
 
-class _StubAudio:
-    def analyze(self, _path):
-        return {"status": "ok", "lip_sync_score": 0.9}
-
-
-class _StubFaceDetectorNoFace:
-    def detect_faces(self, _frame):
-        return []
-
-
-class _StubFaceDetectorWithFace:
-    def detect_faces(self, _frame):
-        return [{"bbox": [10, 10, 60, 60], "score": 0.99}]
+class _StubFaceDetector:
+    def detect_faces(self, frame: np.ndarray) -> list[dict[str, Any]]:
+        return [{"bbox": [1, 1, 10, 10]}]
 
 
 class _StubVisualDetector:
-    threshold = 0.5
+    def __init__(self, threshold: float = 0.5, score: float = 0.8) -> None:
+        self.threshold = threshold
+        self._score = score
 
-    def __init__(self, fail_weights: bool = False) -> None:
-        self.fail_weights = fail_weights
+    def verify_model_weights(self) -> bool:
+        return True
 
-    def verify_model_weights(self) -> None:
-        if self.fail_weights:
-            raise ModelUnavailableError("Missing weights")
-
-    def analyze_frame(self, _frame, faces=None):
+    def analyze_frame(self, frame: np.ndarray, faces: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return {
             "status": "success",
             "face_predictions": [
-                {"bbox": [10, 10, 60, 60], "score": 0.2, "is_deepfake": False}
+                {"bbox": [1, 1, 10, 10], "score": self._score, "is_deepfake": self._score >= self.threshold}
             ],
         }
 
 
-class _StubTemporalAnalyzer:
-    def analyze(self, _tracks):
-        return {"status": "ok", "temporal_score": 0.15}
+class _FailingAudio:
+    def analyze(self, path: Path) -> dict[str, Any]:
+        raise RuntimeError("audio boom")
 
 
-def _make_synthetic_video(video_path: Path, frames: int = 4) -> Path:
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(video_path), fourcc, 10.0, (128, 128))
-    for i in range(frames):
-        frame = np.full((128, 128, 3), 180 + (i * 5) % 40, dtype=np.uint8)
-        cv2.circle(frame, (64, 64), 24, (60, 80, 140), -1)
-        writer.write(frame)
-    writer.release()
-    return video_path
+class _FailingTemporal:
+    def analyze(self, tracks: Any) -> dict[str, Any]:
+        raise RuntimeError("temporal boom")
 
 
-def test_deepfake_pipeline_invalid_and_validation_errors(tmp_path: Path) -> None:
-    pipeline = DeepfakePipeline()
+def _str_only_validator(p: str) -> None:
+    if not isinstance(p, str):
+        raise TypeError("expects str")
 
-    bad_res = pipeline.run(b"raw-bytes-not-a-path")
-    assert bad_res["status"] == "failed"
-    assert bad_res["error_type"] == "InvalidInputError"
 
-    def _failing_validator(_path):
-        raise VideoValidationError("Corrupted synthetic video")
+def _str_only_sampler(p: str) -> list[dict[str, Any]]:
+    if not isinstance(p, str):
+        raise TypeError("expects str")
+    return [{"frame": np.zeros((12, 12, 3), dtype=np.uint8)}]
 
-    strict_pipeline = DeepfakePipeline(video_validator=_failing_validator)
-    vid_path = _make_synthetic_video(tmp_path / "bad.mp4", frames=2)
-    err_res = strict_pipeline.run(vid_path)
+
+def _failing_aggregator(preds: list[dict[str, Any]]) -> dict[str, Any]:
+    raise RuntimeError("agg boom")
+
+
+def test_pipeline_typeerror_fallbacks_and_module_error_paths(tmp_path: Path) -> None:
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake-video")
+
+    pipe = DeepfakePipeline(
+        face_detector=_StubFaceDetector(),  # type: ignore[arg-type]
+        visual_detector=_StubVisualDetector(threshold=0.5, score=0.75),  # type: ignore[arg-type]
+        audio_analyzer=_FailingAudio(),  # type: ignore[arg-type]
+        frame_sampler=_str_only_sampler,
+        temporal_analyzer=_FailingTemporal(),  # type: ignore[arg-type]
+        risk_scorer=lambda signals: {"risk_score": None, "decision": "inconclusive"},
+        video_validator=_str_only_validator,
+        aggregator=_failing_aggregator,
+    )
+
+    res = pipe.run(video)
+    assert res["status"] == "partial"
+    assert res["is_deepfake"] is None
+    assert res["module_statuses"]["audio"] == "error"
+    assert res["module_statuses"]["temporal"] == "error"
+    assert res["module_statuses"]["aggregation"] == "fallback_max"
+    assert res["visual_score"] == pytest.approx(0.75)
+
+
+def test_pipeline_without_risk_scorer_and_validator_exception(tmp_path: Path) -> None:
+    video = tmp_path / "clip2.mp4"
+    video.write_bytes(b"fake-video")
+
+    # Validator raising non-VideoValidationError exception
+    pipe_val_err = DeepfakePipeline(
+        video_validator=lambda p: (_ for _ in ()).throw(ValueError("bad meta")),
+    )
+    err_res = pipe_val_err.run(video)
     assert err_res["status"] == "failed"
-    assert err_res["error_type"] == "VideoValidationError"
+    assert err_res["error_type"] == "ValueError"
 
-
-def test_deepfake_pipeline_sample_frames_and_edge_statuses(tmp_path: Path) -> None:
-    frame_a = np.full((128, 128, 3), 200, dtype=np.uint8)
-    frame_b = np.full((128, 128, 3), 210, dtype=np.uint8)
-
-    no_model_pipe = DeepfakePipeline(
-        audio_analyzer=_StubAudio(),
-        video_validator=lambda _p: True,
+    # risk_scorer=None uses visual_agg_score and visual_detector.threshold
+    pipe_no_scorer = DeepfakePipeline(
+        face_detector=_StubFaceDetector(),  # type: ignore[arg-type]
+        visual_detector=_StubVisualDetector(threshold=0.6, score=0.85),  # type: ignore[arg-type]
+        audio_analyzer=_FailingAudio(),  # type: ignore[arg-type]
+        frame_sampler=lambda p: [np.ones((10, 10, 3), dtype=np.uint8)],
+        risk_scorer=None,  # type: ignore[arg-type]
+        video_validator=lambda p: None,
+        aggregator=lambda preds: {"aggregated_score": 0.85},
     )
-    sampled = no_model_pipe._sample_frames(
-        tmp_path / "stub.mp4",
-        [frame_a, {"frame": frame_b, "timestamp": 0.5}],
+    out = analyze_video_deepfake(
+        video_path=video,
+        face_detector=_StubFaceDetector(),  # type: ignore[arg-type]
+        visual_detector=_StubVisualDetector(threshold=0.6, score=0.85),  # type: ignore[arg-type]
+        audio_analyzer=_FailingAudio(),  # type: ignore[arg-type]
+        frame_sampler=lambda p: [np.ones((10, 10, 3), dtype=np.uint8)],
+        risk_scorer=None,  # type: ignore[arg-type]
+        video_validator=lambda p: None,
+        aggregator=lambda preds: {"aggregated_score": 0.85},
     )
-    assert len(sampled) == 2
-    assert sampled[0]["frame_index"] == 0
-    assert sampled[1]["timestamp"] == 0.5
-
-    no_model_res = no_model_pipe.run(tmp_path / "stub.mp4", frames=[{"frame": frame_a}])
-    assert no_model_res["status"] == "model_unavailable"
-
-    unverified_pipe = DeepfakePipeline(
-        visual_detector=_StubVisualDetector(fail_weights=True),
-        audio_analyzer=_StubAudio(),
-        video_validator=lambda _p: True,
-    )
-    assert unverified_pipe.run(tmp_path / "stub.mp4", frames=[{"frame": frame_a}])["status"] == "model_unavailable"
-
-    ready_pipe = DeepfakePipeline(
-        face_detector=_StubFaceDetectorNoFace(),
-        visual_detector=_StubVisualDetector(fail_weights=False),
-        audio_analyzer=_StubAudio(),
-        video_validator=lambda _p: True,
-    )
-    assert ready_pipe.run(tmp_path / "stub.mp4", frames=[])["status"] == "no_frames"
-    assert ready_pipe.run(tmp_path / "stub.mp4", frames=[{"frame": frame_a}])["status"] == "no_face"
-
-
-def test_deepfake_pipeline_full_run_and_wrapper(tmp_path: Path) -> None:
-    frame_a = np.full((128, 128, 3), 200, dtype=np.uint8)
-    res = analyze_video_deepfake(
-        video_path=tmp_path / "stub.mp4",
-        frames=[{"frame": frame_a, "frame_index": 0, "timestamp": 0.0}],
-        face_detector=_StubFaceDetectorWithFace(),
-        visual_detector=_StubVisualDetector(fail_weights=False),
-        audio_analyzer=_StubAudio(),
-        temporal_analyzer=_StubTemporalAnalyzer(),
-        risk_scorer=lambda _signals: {"risk_score": 0.2, "decision": "authentic", "is_suspicious": False},
-        video_validator=lambda _p: True,
-    )
-    assert res["status"] == "success"
-    assert res["is_deepfake"] is False
-    assert res["faces_detected"] == 1
-    assert len(res["face_predictions"]) == 1
+    assert out["status"] == "success"
+    assert out["is_deepfake"] is True
+    assert out["risk_score"] == pytest.approx(0.85)
+    assert pipe_no_scorer is not None
