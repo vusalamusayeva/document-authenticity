@@ -63,3 +63,19 @@ def test_base_doc_model_concrete_subclass(tmp_path: Path) -> None:
     model.save(str(artifact))
     restored = _DummyDocModel.load(str(artifact))
     assert restored.fitted is True
+import pytest
+from doc_auth.utils.base_model import BaseDocModel
+
+
+class _ConcreteDocModel(BaseDocModel):
+    def fit(self, X, y=None, **kwargs):
+        return super().fit(X, y, **kwargs)
+
+    def predict(self, X):
+        return X
+
+
+def test_base_doc_model_super_fit_raises_not_implemented() -> None:
+    model = _ConcreteDocModel()
+    with pytest.raises(NotImplementedError):
+        model.fit([[1.0]], [1])
