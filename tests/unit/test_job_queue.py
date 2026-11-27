@@ -95,3 +95,37 @@ def test_background_worker_validation_success_and_failure() -> None:
 
     rec = JobRecord.from_dict({"job_id": "rec-1"})
     assert rec.to_dict()["job_id"] == "rec-1"
+import json
+from pathlib import Path
+import pytest
+from doc_auth.utils.job_queue import JobQueue, JobRecord
+
+
+def test_load_from_disk_ignores_non_dict_json_root(tmp_path: Path) -> None:
+    store = tmp_path / "queue_list.json"
+    store.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
+    q = JobQueue(store_path=store)
+    assert q._jobs == {}
+    assert q.qsize() == 0
+
+
+def test_load_from_disk_requeues_job_when_handler_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "queue_requeue.json"
+    store.write_text(
+        json.dumps({"job-1": JobRecord(job_id="job-1", status="queued").to_dict()}),
+        encoding="utf-8",
+    )
+    orig_load = JobQueue._load_from_disk
+
+    def _wrapped_load(self: JobQueue, recover_running: bool = True) -> None:
+        self._handlers["job-1"] = lambda: "ok"
+        orig_load(self, recover_running=recover_running)
+
+    monkeypatch.setattr(JobQueue, "_load_from_disk", _wrapped_load)
+    q = JobQueue(store_path=store)
+    assert q.qsize() == 1
+    popped = q.pop_next(timeout=0.1)
+    assert popped is not None
+    assert popped[0] == "job-1"
