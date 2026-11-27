@@ -221,3 +221,63 @@ def test_validate_video_and_stream_reader(tmp_path: Path, monkeypatch: pytest.Mo
 
     assert cap_obj.released is True
     assert reader.cap is None
+import json
+import subprocess
+from pathlib import Path
+from typing import Any
+import pytest
+
+from doc_auth.deepfake import video_loader as vl_mod
+from doc_auth.deepfake.exceptions import VideoLoadError
+from doc_auth.deepfake.video_loader import probe_video_metadata
+
+
+def test_video_loader_unopened_cv2_fallback_and_invalid_fps_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    vid = tmp_path / "sample.mp4"
+    vid.write_bytes(b"dummy-video-bytes")
+
+    # 1. ffprobe fails -> fallback cv2.VideoCapture fails to open -> VideoLoadError (lines 56-57)
+    def _ffprobe_fail(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="probe err")
+
+    class _ClosedCap:
+        def __init__(self, _path: str) -> None:
+            self.released = False
+
+        def isOpened(self) -> bool:
+            return False
+
+        def release(self) -> None:
+            self.released = True
+
+    monkeypatch.setattr(vl_mod.subprocess, "run", _ffprobe_fail)
+    monkeypatch.setattr(vl_mod.cv2, "VideoCapture", _ClosedCap)
+    with pytest.raises(VideoLoadError):
+        probe_video_metadata(vid)
+
+    # 2. Invalid fractional and non-fractional r_frame_rate -> defaults to 25.0 (lines 98-99, 103-104)
+    for bad_fps in ("30/not_a_num", "not_a_float"):
+        payload = {
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "width": 640,
+                    "height": 480,
+                    "r_frame_rate": bad_fps,
+                    "duration": "2.0",
+                    "nb_frames": "50",
+                }
+            ],
+            "format": {"duration": "2.0"},
+        }
+
+        def _ffprobe_ok(
+            cmd: list[str], _p: str = json.dumps(payload), **kwargs: Any
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout=_p, stderr="")
+
+        monkeypatch.setattr(vl_mod.subprocess, "run", _ffprobe_ok)
+        meta = probe_video_metadata(vid)
+        assert meta["fps"] == 25.0
