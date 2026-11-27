@@ -168,3 +168,12 @@ def test_metadata_resolve_path_from_dict_and_parse_error_signals(
     assert res_pdf["status"] == "success"
     assert res_pdf["suspicious"] is True
     assert any("PDF metadata-s" in r for r in res_pdf["reasons"])
+from pathlib import Path
+
+from doc_auth.metadata.metadata_analysis import MetadataAnalyzer
+
+
+def test_resolve_path_returns_none_for_missing_path_in_dict(tmp_path: Path) -> None:
+    analyzer = MetadataAnalyzer()
+    missing_file = tmp_path / "does_not_exist.pdf"
+    assert analyzer._resolve_path({"document_path": str(missing_file)}) is None
