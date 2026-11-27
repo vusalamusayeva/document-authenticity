@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, Optional
+from typing import Any
 
 from doc_auth.deepfake.exceptions import InvalidConfigError
 
@@ -50,11 +50,16 @@ class DeepfakeRiskScorer:
         self.audio_weight = aw
         self.suspicious_threshold = float(suspicious_threshold)
 
-    def score(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def score(self, signals: dict[str, Any] | None = None) -> dict[str, Any]:
         data = signals or {}
-        visual = data.get("visual") if isinstance(data.get("visual"), dict) else {}
-        temporal = data.get("temporal") if isinstance(data.get("temporal"), dict) else {}
-        audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
+        raw_visual = data.get("visual")
+        visual: dict[str, Any] = raw_visual if isinstance(raw_visual, dict) else {}
+
+        raw_temporal = data.get("temporal")
+        temporal: dict[str, Any] = raw_temporal if isinstance(raw_temporal, dict) else {}
+
+        raw_audio = data.get("audio")
+        audio: dict[str, Any] = raw_audio if isinstance(raw_audio, dict) else {}
 
         weighted_sum = 0.0
         active_weight = 0.0
@@ -108,22 +113,22 @@ class DeepfakeRiskScorer:
 
     def compute_risk(
         self,
-        max_visual_score: Optional[float] = None,
-        temporal_score: Optional[float] = None,
-        audio_analysis: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        visual_payload: Dict[str, Any] = (
+        max_visual_score: float | None = None,
+        temporal_score: float | None = None,
+        audio_analysis: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        visual_payload: dict[str, Any] = (
             {"status": "success", "score": max_visual_score}
             if max_visual_score is not None
             else {"status": "unavailable", "score": None}
         )
-        temporal_payload: Dict[str, Any] = (
+        temporal_payload: dict[str, Any] = (
             {"status": "success", "temporal_score": temporal_score}
             if temporal_score is not None
             else {"status": "unavailable", "temporal_score": None}
         )
 
-        audio_payload: Dict[str, Any] = {"status": "unavailable", "lip_sync_score": None}
+        audio_payload: dict[str, Any] = {"status": "unavailable", "lip_sync_score": None}
         if isinstance(audio_analysis, dict):
             if "lip_sync_score" in audio_analysis and audio_analysis["lip_sync_score"] is not None:
                 audio_payload = {"status": "success", "lip_sync_score": audio_analysis["lip_sync_score"]}
@@ -138,7 +143,7 @@ class DeepfakeRiskScorer:
             "audio": audio_payload,
         })
 
-    def __call__(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __call__(self, signals: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.score(signals)
 
 
@@ -146,13 +151,13 @@ RiskScorer = DeepfakeRiskScorer
 
 
 def calculate_risk_score(
-    signals: Optional[Dict[str, Any]] = None,
-    weights: Optional[Dict[str, float]] = None,
+    signals: dict[str, Any] | None = None,
+    weights: dict[str, float] | None = None,
     visual_weight: float = 0.65,
     temporal_weight: float = 0.20,
     audio_weight: float = 0.15,
     suspicious_threshold: float = 0.50,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if isinstance(weights, dict):
         vw = weights.get("visual", weights.get("visual_weight", 0.0))
         tw = weights.get("temporal", weights.get("temporal_weight", 0.0))
