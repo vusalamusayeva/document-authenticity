@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class DecisionModel:
@@ -14,16 +14,26 @@ class DecisionModel:
             raise ValueError("suspicious_threshold [0.0, 1.0] aral???nda olmal?d?r.")
         self.suspicious_threshold = suspicious_threshold
 
-    def decide(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        data = signals or {}
-        forensics = data.get("forensics") if isinstance(data.get("forensics"), dict) else {}
-        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        ocr = data.get("ocr") if isinstance(data.get("ocr"), dict) else {}
-        classification = data.get("classification") if isinstance(data.get("classification"), dict) else {}
+    def decide(self, signals: dict[str, Any] | None = None) -> dict[str, Any]:
+        data: dict[str, Any] = signals if isinstance(signals, dict) else {}
+
+        raw_forensics = data.get("forensics")
+        forensics: dict[str, Any] = raw_forensics if isinstance(raw_forensics, dict) else {}
+
+        raw_metadata = data.get("metadata")
+        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+
+        raw_ocr = data.get("ocr")
+        ocr: dict[str, Any] = raw_ocr if isinstance(raw_ocr, dict) else {}
+
+        raw_classification = data.get("classification")
+        classification: dict[str, Any] = (
+            raw_classification if isinstance(raw_classification, dict) else {}
+        )
 
         risk_points = 0.0
         weight_sum = 0.0
-        contributions: List[Dict[str, Any]] = []
+        contributions: list[dict[str, Any]] = []
 
         tampering_score = forensics.get("tampering_score")
         if isinstance(tampering_score, (int, float)) and not isinstance(tampering_score, bool):
@@ -98,14 +108,14 @@ class DecisionModel:
             "contributions": contributions,
         }
 
-    def fuse(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def fuse(self, signals: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.decide(signals)
 
-    def predict(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def predict(self, signals: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.decide(signals)
 
-    def analyze(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def analyze(self, signals: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.decide(signals)
 
-    def __call__(self, signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __call__(self, signals: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.decide(signals)
