@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import cv2
 import numpy as np
@@ -17,7 +17,7 @@ class SignatureStampDetector:
         upper_blue = np.array([130, 255, 255])
         return cv2.inRange(hsv, lower_blue, upper_blue)
 
-    def detect_stamps_and_signatures(self, image: np.ndarray) -> Dict[str, List[Dict[str, Any]]]:
+    def detect_stamps_and_signatures(self, image: np.ndarray) -> dict[str, list[dict[str, Any]]]:
         try:
             if image is None or image.size == 0:
                 raise SignatureStampError("Analiz üçün şəkil tapılmadı.")
@@ -41,8 +41,8 @@ class SignatureStampDetector:
 
             contours, _ = cv2.findContours(morph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            stamps: List[Dict[str, Any]] = []
-            signatures: List[Dict[str, Any]] = []
+            stamps: list[dict[str, Any]] = []
+            signatures: list[dict[str, Any]] = []
 
             for cnt in contours:
                 area = cv2.contourArea(cnt)
@@ -94,7 +94,7 @@ class SignatureStampDetector:
         except Exception as exc:
             raise SignatureStampError(f"Deteksiya zamanı xəta: {exc}") from exc
 
-    def detect_signature(self, image: np.ndarray) -> Optional[BoundingBox]:
+    def detect_signature(self, image: np.ndarray) -> BoundingBox | None:
         results = self.detect_stamps_and_signatures(image)
         sigs = results.get("signatures", [])
         if sigs:

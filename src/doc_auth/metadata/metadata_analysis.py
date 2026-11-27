@@ -1,7 +1,7 @@
 import datetime
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class MetadataAnalyzer:
@@ -33,7 +33,7 @@ class MetadataAnalyzer:
             raise ValueError("chunk_size m?sb?t tam ?d?d olmal?d?r.")
         self.chunk_size = chunk_size
 
-    def _resolve_path(self, payload: Any) -> Optional[Path]:
+    def _resolve_path(self, payload: Any) -> Path | None:
         if isinstance(payload, (str, Path)):
             p = Path(payload)
             return p if p.exists() and p.is_file() else None
@@ -56,13 +56,13 @@ class MetadataAnalyzer:
                 hasher.update(chunk)
         return hasher.hexdigest()
 
-    def _extract_embedded_metadata(self, file_path: Path, ext: str) -> tuple[Dict[str, Any], List[str]]:
-        meta: Dict[str, Any] = {}
-        parse_errors: List[str] = []
+    def _extract_embedded_metadata(self, file_path: Path, ext: str) -> tuple[dict[str, Any], list[str]]:
+        meta: dict[str, Any] = {}
+        parse_errors: list[str] = []
 
         if ext in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
             try:
-                from PIL import Image, ExifTags  # type: ignore
+                from PIL import ExifTags, Image  # type: ignore
 
                 with Image.open(file_path) as img:
                     meta["format"] = img.format
@@ -74,7 +74,7 @@ class MetadataAnalyzer:
                                 meta[str(k)] = v
                     exif_obj = img.getexif()
                     if exif_obj:
-                        exif_map: Dict[str, Any] = {}
+                        exif_map: dict[str, Any] = {}
                         for tag_id, val in exif_obj.items():
                             tag_name = ExifTags.TAGS.get(tag_id, str(tag_id))
                             if isinstance(val, bytes):
@@ -82,7 +82,7 @@ class MetadataAnalyzer:
                             exif_map[str(tag_name)] = val
                         if exif_map:
                             meta["exif"] = exif_map
-            except Exception as exc:
+            except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 parse_errors.append(f"G?r?nt? metadata-s? oxuna bilm?di: {exc}")
 
         if ext == ".pdf":
@@ -96,12 +96,12 @@ class MetadataAnalyzer:
                         if v:
                             meta[f"pdf_{k.lower()}"] = str(v)
                 doc.close()
-            except Exception as exc:
+            except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 parse_errors.append(f"PDF metadata-s? oxuna bilm?di: {exc}")
 
         return meta, parse_errors
 
-    def analyze(self, payload: Any) -> Dict[str, Any]:
+    def analyze(self, payload: Any) -> dict[str, Any]:
         file_path = self._resolve_path(payload)
         if file_path is None:
             return {
@@ -113,13 +113,13 @@ class MetadataAnalyzer:
 
         stat = file_path.stat()
         ext = file_path.suffix.lower()
-        modified_at = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.timezone.utc).isoformat()
-        created_at = datetime.datetime.fromtimestamp(stat.st_ctime, tz=datetime.timezone.utc).isoformat()
+        modified_at = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.UTC).isoformat()
+        created_at = datetime.datetime.fromtimestamp(stat.st_ctime, tz=datetime.UTC).isoformat()
         embedded, parse_errors = self._extract_embedded_metadata(file_path, ext)
 
         suspicious = False
-        reasons: List[str] = []
-        suspicious_signals: List[Dict[str, Any]] = []
+        reasons: list[str] = []
+        suspicious_signals: list[dict[str, Any]] = []
 
         if stat.st_size == 0:
             suspicious = True
@@ -148,7 +148,7 @@ class MetadataAnalyzer:
             reasons.append(err)
             suspicious_signals.append({"field": "embedded_metadata", "value": None, "reason": err})
 
-        software_fields: List[tuple[str, str]] = []
+        software_fields: list[tuple[str, str]] = []
         exif_data = embedded.get("exif", {})
         if isinstance(exif_data, dict):
             for key in ("Software", "ProcessingSoftware", "HostComputer"):
@@ -195,11 +195,11 @@ class MetadataAnalyzer:
             "suspicious_signals": suspicious_signals,
         }
 
-    def extract(self, payload: Any) -> Dict[str, Any]:
+    def extract(self, payload: Any) -> dict[str, Any]:
         return self.analyze(payload)
 
-    def inspect(self, payload: Any) -> Dict[str, Any]:
+    def inspect(self, payload: Any) -> dict[str, Any]:
         return self.analyze(payload)
 
-    def __call__(self, payload: Any) -> Dict[str, Any]:
+    def __call__(self, payload: Any) -> dict[str, Any]:
         return self.analyze(payload)

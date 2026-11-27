@@ -1,6 +1,6 @@
-from pathlib import Path
 import shutil
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -27,7 +27,7 @@ class OCRChecker:
         self.min_confidence = min_confidence
         self.lang = lang
 
-    def _resolve_image(self, payload: Any) -> Optional[np.ndarray]:
+    def _resolve_image(self, payload: Any) -> np.ndarray | None:
         if isinstance(payload, np.ndarray):
             return payload if payload.size > 0 else None
         if isinstance(payload, dict):
@@ -63,7 +63,7 @@ class OCRChecker:
         foreground_pixels = float(np.count_nonzero(adaptive))
         return round(foreground_pixels / total_pixels, 6)
 
-    def _run_tesseract(self, gray: np.ndarray) -> Dict[str, Any]:
+    def _run_tesseract(self, gray: np.ndarray) -> dict[str, Any]:
         import pytesseract  # type: ignore
 
         exe = getattr(pytesseract.pytesseract, "tesseract_cmd", "tesseract")
@@ -75,9 +75,9 @@ class OCRChecker:
             lang=self.lang,
             output_type=pytesseract.Output.DICT,
         )
-        words: List[str] = []
-        confidences: List[float] = []
-        fields: List[Dict[str, Any]] = []
+        words: list[str] = []
+        confidences: list[float] = []
+        fields: list[dict[str, Any]] = []
 
         raw_texts = data.get("text", [])
         raw_confs = data.get("conf", [])
@@ -119,14 +119,14 @@ class OCRChecker:
             "fields": fields,
         }
 
-    def _run_easyocr(self, gray: np.ndarray) -> Dict[str, Any]:
+    def _run_easyocr(self, gray: np.ndarray) -> dict[str, Any]:
         import easyocr  # type: ignore
 
         reader = easyocr.Reader([self.lang if len(self.lang) == 2 else "en"], gpu=False, verbose=False)
         results = reader.readtext(gray)
-        words: List[str] = []
-        confidences: List[float] = []
-        fields: List[Dict[str, Any]] = []
+        words: list[str] = []
+        confidences: list[float] = []
+        fields: list[dict[str, Any]] = []
 
         for bbox, text, conf in results:
             token = str(text).strip()
@@ -145,7 +145,7 @@ class OCRChecker:
             "fields": fields,
         }
 
-    def check(self, payload: Any) -> Dict[str, Any]:
+    def check(self, payload: Any) -> dict[str, Any]:
         image = self._resolve_image(payload)
         if image is None:
             return {
@@ -162,14 +162,14 @@ class OCRChecker:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
         text_density = self._compute_text_density(gray)
 
-        engine_errors: List[str] = []
-        ocr_out: Optional[Dict[str, Any]] = None
+        engine_errors: list[str] = []
+        ocr_out: dict[str, Any] | None = None
 
         for runner in (self._run_tesseract, self._run_easyocr):
             try:
                 ocr_out = runner(gray)
                 break
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError) as exc:
                 engine_errors.append(f"{runner.__name__}: {exc}")
 
         if ocr_out is None:
@@ -204,11 +204,11 @@ class OCRChecker:
             "min_confidence": self.min_confidence,
         }
 
-    def run(self, payload: Any) -> Dict[str, Any]:
+    def run(self, payload: Any) -> dict[str, Any]:
         return self.check(payload)
 
-    def analyze(self, payload: Any) -> Dict[str, Any]:
+    def analyze(self, payload: Any) -> dict[str, Any]:
         return self.check(payload)
 
-    def __call__(self, payload: Any) -> Dict[str, Any]:
+    def __call__(self, payload: Any) -> dict[str, Any]:
         return self.check(payload)

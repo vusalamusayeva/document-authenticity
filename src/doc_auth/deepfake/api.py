@@ -120,7 +120,7 @@ def create_deepfake_router(
             state["model_info"] = model_info
             state["ready"] = True
             state["error"] = None
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, ImportError) as exc:
             state["ready"] = False
             state["error"] = str(exc)
             state["model_info"] = None

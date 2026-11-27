@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -42,16 +42,16 @@ def _extract_risk_value(tex_res: Any, keys: tuple[str, ...]) -> float:
 def analyze_signature_stamp(
     image: np.ndarray,
     file_id: str,
-    reference_signatures: Optional[List[np.ndarray]] = None,
+    reference_signatures: list[np.ndarray] | None = None,
     output_dir: str = "outputs",
 ) -> SignatureStampResult:
     """
     Sənəd şəkli üzərində imza və möhür analizi həyata keçirir.
     """
-    errors: List[str] = []
-    candidates: List[Candidate] = []
-    items: List[SignatureStampItem] = []
-    signature_verifications: List[Dict[str, Any]] = []
+    errors: list[str] = []
+    candidates: list[Candidate] = []
+    items: list[SignatureStampItem] = []
+    signature_verifications: list[dict[str, Any]] = []
 
     try:
         if image is None or not isinstance(image, np.ndarray) or image.size == 0:
@@ -63,7 +63,7 @@ def analyze_signature_stamp(
         detector = SignatureStampDetector()
         detection_results = detector.detect_stamps_and_signatures(image)
 
-        processed_sigs: List[np.ndarray] = []
+        processed_sigs: list[np.ndarray] = []
         max_sig_texture_risk = 0.0
 
         for idx, sig in enumerate(detection_results.get("signatures", [])):
@@ -168,7 +168,7 @@ def analyze_signature_stamp(
         if reference_signatures and processed_sigs:
             for sig_idx, proc_sig in enumerate(processed_sigs):
                 best_sim = 0.0
-                best_metrics: Dict[str, Any] = {}
+                best_metrics: dict[str, Any] = {}
                 for ref_img in reference_signatures:
                     ref_proc = preprocess_signature(ref_img)
                     sim_res = SignatureSimilarity.compare(proc_sig, ref_proc)
@@ -233,7 +233,7 @@ def analyze_signature_stamp(
             errors=errors,
         )
 
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
         errors.append(str(exc))
         return SignatureStampResult(
             file_id="safe_failed_doc",

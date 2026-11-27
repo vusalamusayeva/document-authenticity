@@ -26,7 +26,7 @@ class SignatureSimilarity:
             from skimage.metrics import structural_similarity as ssim
             score, _ = ssim(i1, i2, full=True)
             return float(max(0.0, score))
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, AttributeError, ImportError, FloatingPointError):
             return 0.0
 
     @classmethod
@@ -44,7 +44,7 @@ class SignatureSimilarity:
             distance = cv2.norm(hu1, hu2, cv2.NORM_L2)
             similarity = 1.0 / (1.0 + distance)
             return float(max(0.0, similarity))
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, AttributeError, ZeroDivisionError, FloatingPointError):
             return 0.0
 
     @classmethod
@@ -64,7 +64,7 @@ class SignatureSimilarity:
             match_val = cv2.matchShapes(c1, c2, cv2.CONTOURS_MATCH_I1, 0.0)
             similarity = max(0.0, 1.0 - match_val)
             return float(similarity)
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, AttributeError, FloatingPointError):
             return 0.0
 
     @classmethod
@@ -93,7 +93,7 @@ class SignatureSimilarity:
             
             score = len(good_matches) / max(len(kp1), len(kp2), 1)
             return float(min(1.0, score * 2))
-        except Exception:
+        except (ValueError, TypeError, RuntimeError, AttributeError, ZeroDivisionError, FloatingPointError):
             return 0.0
 
     @classmethod

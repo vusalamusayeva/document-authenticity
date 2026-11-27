@@ -21,7 +21,7 @@ def check_readiness_state(service_obj: Any, required_langs: tuple[str, ...] = ("
     if model_ok and hasattr(service_obj, "is_ready") and callable(service_obj.is_ready):
         try:
             model_ok = bool(service_obj.is_ready())
-        except Exception:
+        except (RuntimeError, ValueError, TypeError, AttributeError, OSError):
             model_ok = False
 
     tess_bin = shutil.which("tesseract")
@@ -30,19 +30,19 @@ def check_readiness_state(service_obj: Any, required_langs: tuple[str, ...] = ("
     if tess_bin:
         ocr_engine = "tesseract"
         try:
-            proc = _sp.run([tess_bin, "--list-langs"], capture_output=True, text=True, timeout=5)
+            proc = _sp.run([tess_bin, "--list-langs"], check=False, capture_output=True, text=True, timeout=5)
             if proc.returncode == 0:
                 installed_langs = [
                     ln.strip() for ln in proc.stdout.splitlines()[1:] if ln.strip()
                 ]
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
             installed_langs = []
     else:
         try:
             import easyocr  # type: ignore  # noqa: F401
             ocr_engine = "easyocr"
             installed_langs = ["eng", "aze"]
-        except Exception:
+        except (ImportError, OSError, RuntimeError, ValueError, TypeError):
             ocr_engine = None
 
     missing_langs = [lg for lg in required_langs if lg not in installed_langs]
@@ -164,7 +164,7 @@ def create_document_router(
             raise
         except ValueError:
             raise HTTPException(status_code=400, detail="Fayl m?zmunu emal edil? bilm?di.")
-        except Exception:
+        except (OSError, RuntimeError, TypeError, KeyError, AttributeError):
             raise HTTPException(status_code=500, detail="S?n?d analizi zaman? daxili x?ta ba? verdi.")
         finally:
             if temp_path is not None and temp_path.exists():
@@ -254,7 +254,7 @@ def create_document_router(
             return record
         except HTTPException:
             raise
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError, AttributeError):
             raise HTTPException(status_code=500, detail="Tap??r?q icra edil?rk?n daxili x?ta ba? verdi.")
         finally:
             if temp_path is not None and temp_path.exists():

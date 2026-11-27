@@ -1,5 +1,6 @@
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -23,14 +24,14 @@ class DeepfakePipeline:
 
     def __init__(
         self,
-        face_detector: Optional[FaceDetector] = None,
-        visual_detector: Optional[VisualDetector] = None,
-        audio_analyzer: Optional[AudioLipSyncAnalyzer] = None,
-        frame_sampler: Optional[Callable[[str | Path], Iterable[Dict[str, Any]]]] = None,
-        temporal_analyzer: Optional[TemporalAnalyzer] = None,
-        risk_scorer: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
-        video_validator: Optional[Callable[[str | Path], Any]] = None,
-        aggregator: Optional[Callable[..., Dict[str, Any]]] = None,
+        face_detector: FaceDetector | None = None,
+        visual_detector: VisualDetector | None = None,
+        audio_analyzer: AudioLipSyncAnalyzer | None = None,
+        frame_sampler: Callable[[str | Path], Iterable[dict[str, Any]]] | None = None,
+        temporal_analyzer: TemporalAnalyzer | None = None,
+        risk_scorer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        video_validator: Callable[[str | Path], Any] | None = None,
+        aggregator: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self.face_detector = face_detector or FaceDetector()
         self.visual_detector = visual_detector
@@ -56,7 +57,7 @@ class DeepfakePipeline:
         except TypeError:
             self.video_validator(str(path))
 
-    def _sample_frames(self, path: Path, frames: Optional[Iterable[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _sample_frames(self, path: Path, frames: Iterable[dict[str, Any]] | None) -> list[dict[str, Any]]:
         if frames is not None:
             raw_stream = frames
         else:
@@ -65,7 +66,7 @@ class DeepfakePipeline:
             except TypeError:
                 raw_stream = self.frame_sampler(str(path))
 
-        sampled: List[Dict[str, Any]] = []
+        sampled: list[dict[str, Any]] = []
         for idx, item in enumerate(raw_stream):
             if isinstance(item, np.ndarray):
                 sampled.append({
@@ -83,8 +84,8 @@ class DeepfakePipeline:
     def run(
         self,
         video_path: Any,
-        frames: Optional[Iterable[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        frames: Iterable[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         if isinstance(video_path, (bytes, bytearray, memoryview)) or not isinstance(video_path, (str, Path)):
             return {
                 "status": "failed",
@@ -127,7 +128,7 @@ class DeepfakePipeline:
                 "frames_analyzed": 0,
                 "faces_detected": 0,
             }
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
             return {
                 "status": "failed",
                 "is_deepfake": None,
@@ -146,7 +147,7 @@ class DeepfakePipeline:
 
         try:
             audio_result = self.audio_analyzer.analyze(path)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
             audio_result = {"status": "error", "error": str(exc)}
 
         if self.visual_detector is None:
@@ -224,8 +225,8 @@ class DeepfakePipeline:
             }
 
         total_faces = 0
-        all_face_predictions: List[Dict[str, Any]] = []
-        frame_face_items: List[Dict[str, Any]] = []
+        all_face_predictions: list[dict[str, Any]] = []
+        frame_face_items: list[dict[str, Any]] = []
 
         for idx, item in enumerate(sampled_frames):
             frame = item["frame"]
@@ -241,7 +242,7 @@ class DeepfakePipeline:
                 continue
             total_faces += len(faces)
             frame_pred = self.visual_detector.analyze_frame(frame, faces=faces)
-            frame_faces_payload: List[Dict[str, Any]] = []
+            frame_faces_payload: list[dict[str, Any]] = []
             if frame_pred.get("status") == "success":
                 for i_f, fp in enumerate(frame_pred.get("face_predictions", [])):
                     entry = dict(fp)
@@ -280,7 +281,7 @@ class DeepfakePipeline:
             tracks = assign_face_tracks(frame_face_items)
             temporal_summary = self.temporal_analyzer.analyze(tracks)
             temporal_status = "success"
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
             temporal_summary = {"status": "error", "error": str(exc), "temporal_score": None}
             temporal_status = "error"
 
@@ -293,7 +294,7 @@ class DeepfakePipeline:
                 )
             )
             agg_status = "success"
-        except Exception:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError):
             visual_agg_score = float(max(p["score"] for p in all_face_predictions))
             agg_result = {"aggregated_score": visual_agg_score}
             agg_status = "fallback_max"
@@ -301,7 +302,7 @@ class DeepfakePipeline:
         max_visual_score = float(max(p["score"] for p in all_face_predictions))
         temporal_score = temporal_summary.get("temporal_score")
 
-        signals_payload: Dict[str, Any] = {
+        signals_payload: dict[str, Any] = {
             "visual": {
                 "status": "success",
                 "score": visual_agg_score,
@@ -355,16 +356,16 @@ class DeepfakePipeline:
 
 def analyze_video_deepfake(
     video_path: Any,
-    frames: Optional[Iterable[Dict[str, Any]]] = None,
-    face_detector: Optional[FaceDetector] = None,
-    visual_detector: Optional[VisualDetector] = None,
-    audio_analyzer: Optional[AudioLipSyncAnalyzer] = None,
-    frame_sampler: Optional[Callable[[str | Path], Iterable[Dict[str, Any]]]] = None,
-    temporal_analyzer: Optional[TemporalAnalyzer] = None,
-    risk_scorer: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
-    video_validator: Optional[Callable[[str | Path], Any]] = None,
-    aggregator: Optional[Callable[..., Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
+    frames: Iterable[dict[str, Any]] | None = None,
+    face_detector: FaceDetector | None = None,
+    visual_detector: VisualDetector | None = None,
+    audio_analyzer: AudioLipSyncAnalyzer | None = None,
+    frame_sampler: Callable[[str | Path], Iterable[dict[str, Any]]] | None = None,
+    temporal_analyzer: TemporalAnalyzer | None = None,
+    risk_scorer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    video_validator: Callable[[str | Path], Any] | None = None,
+    aggregator: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     pipeline = DeepfakePipeline(
         face_detector=face_detector,
         visual_detector=visual_detector,
