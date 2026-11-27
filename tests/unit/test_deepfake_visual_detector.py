@@ -48,4 +48,4 @@ def test_load_model_raises_when_torch_unavailable(monkeypatch: pytest.MonkeyPatc
     detector = vd_mod.VisualDetector(checkpoint_path=str(ckpt))
 
     with pytest.raises(ModelUnavailableError):
-        detector._load_model()
+        detector.load_model()
