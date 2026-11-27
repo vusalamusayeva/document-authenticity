@@ -50,7 +50,7 @@ def test_visual_detector_loads_torch_checkpoint_and_infers(
     import doc_auth.deepfake.visual_detector as vd_mod
 
     fake_nn = types.SimpleNamespace(Module=type("_FakeModule", (), {}))
-    fake_torch = types.SimpleNamespace(load=lambda *a, **kw: {"epoch": 1, "state_dict": {}})
+    fake_torch = types.SimpleNamespace(load=lambda *a, **kw: {"epoch": 1, "state_dict": {"weight": [0.1]}})
     monkeypatch.setattr(vd_mod, "nn", fake_nn, raising=False)
     monkeypatch.setattr(vd_mod, "torch", fake_torch, raising=False)
 
@@ -172,3 +172,17 @@ def test_visual_detector_torch_module_and_state_dict_branches(
     monkeypatch.setattr(vd_mod, "torch", types.SimpleNamespace(load=_boom), raising=False)
     with pytest.raises(ModelUnavailableError):
         VisualDetector(checkpoint_path=err_ckpt).load_model()
+
+
+def test_visual_detector_load_model_fallback_when_torch_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import doc_auth.deepfake.visual_detector as vd_mod
+
+    monkeypatch.setattr(vd_mod, "torch", None, raising=False)
+    ckpt = tmp_path / "fallback.pt"
+    ckpt.write_bytes(b"pt-data")
+
+    detector = VisualDetector(checkpoint_path=ckpt)
+    with pytest.raises(ModelUnavailableError):
+        detector.load_model()
