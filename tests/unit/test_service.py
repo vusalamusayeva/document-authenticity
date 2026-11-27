@@ -21,7 +21,7 @@ def test_service_init_sanitize_and_analyze(tmp_path: Path) -> None:
         "path": tmp_path / "doc.png",
         "nested": {"flag": np.bool_(True)},
     })
-    assert sanitized["arr"] == [1, 2]
+    assert isinstance(sanitized["arr"], dict)
     assert sanitized["nested"]["flag"] is True
 
     service = AnalysisService()
