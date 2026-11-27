@@ -136,7 +136,17 @@ def create_document_router(
 
         return temp_path, total_bytes
 
-    @router.post("/analyze", response_model=DocumentAuthSummary)
+    @router.post(
+        "/analyze",
+        response_model=DocumentAuthSummary,
+        summary="Analyze uploaded document file (multipart/form-data)",
+        responses={
+            200: {"model": DocumentAuthSummary, "description": "Document authentication summary"},
+            400: {"description": "Invalid file, unsupported format, empty file, or magic byte mismatch"},
+            413: {"description": "Uploaded file exceeds maximum allowed size"},
+            500: {"description": "Internal error during document analysis"},
+        },
+    )
     @router.post("/analyze-file", response_model=DocumentAuthSummary, include_in_schema=False)
     async def analyze_document_file_endpoint(file: UploadFile = File(...)) -> DocumentAuthSummary:
         temp_path: Optional[Path] = None
@@ -162,19 +172,42 @@ def create_document_router(
                     pass
 
 
-    @router.post("/analyze/json", response_model=Dict[str, Any], openapi_extra={
-        "requestBody": {
-            "content": {
-                "application/json": {
-                    "example": {
-                        "document_id": "doc_001",
-                        "file_path": "samples/sample_en.pdf",
-                        "languages": ["eng", "aze"]
+    @router.post(
+        "/analyze/json",
+        response_model=Dict[str, Any],
+        summary="Analyze document via JSON payload (file_path)",
+        responses={
+            200: {"description": "Document authentication summary dictionary"},
+            404: {"description": "Specified file_path does not exist"},
+            422: {"description": "Missing or invalid file_path in JSON payload"},
+            501: {"description": "JSON file analysis not supported by service"},
+        },
+        openapi_extra={
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "file_path_request": {
+                                "summary": "Local document file path",
+                                "value": {
+                                    "document_id": "doc_001",
+                                    "file_path": "samples/sample_en.pdf",
+                                    "languages": ["eng", "aze"],
+                                },
+                            },
+                            "base64_request": {
+                                "summary": "Base64 document payload",
+                                "value": {
+                                    "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+                                    "document_type_hint": "passport",
+                                },
+                            },
+                        }
                     }
                 }
             }
-        }
-    })
+        },
+    )
     async def analyze_document_json_endpoint(payload: Dict[str, Any]) -> Dict[str, Any]:
         file_ref = payload.get("file_path") or payload.get("path")
         if not file_ref or not isinstance(file_ref, str):

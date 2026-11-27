@@ -1,14 +1,10 @@
-import asyncio
 from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request
 import uuid
 
-from api.schemas.document import DocumentAnalysisRequest, DocumentAnalysisResponse
-from api.services.analysis_service import AnalysisService
 from doc_auth.api import create_document_router
 from doc_auth.deepfake.api import attach_deepfake_router
-from doc_auth.deepfake.exceptions import InvalidConfigError, ModelUnavailableError, VideoValidationError
 
 
 import shutil
@@ -83,17 +79,3 @@ async def ready() -> dict[str, Any]:
     if not ok:
         raise HTTPException(status_code=503, detail=payload)
     return payload
-
-
-@app.post("/v1/analyze", response_model=DocumentAnalysisResponse)
-async def analyze(request: DocumentAnalysisRequest) -> Any:
-    try:
-        return await asyncio.to_thread(service.analyze, request)
-    except (ValueError, InvalidConfigError, VideoValidationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ModelUnavailableError as exc:
-        raise HTTPException(status_code=503, detail="Model haz?rda ?l?atan deyil.") from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Daxili analiz x?tas? ba? verdi.") from exc

@@ -70,3 +70,18 @@ def test_analyze_upload_size_empty_and_magic_byte_errors(tmp_path) -> None:
     r_200 = client.post("/v1/analyze/json", json={"file_path": str(img_file)})
     assert r_200.status_code == 200
     assert "checks" in r_200.json()
+
+
+def test_v1_analyze_single_post_and_openapi_examples() -> None:
+    post_analyze_routes = [
+        r for r in app.routes
+        if getattr(r, "path", None) == "/v1/analyze" and "POST" in getattr(r, "methods", set())
+    ]
+    assert len(post_analyze_routes) == 1
+
+    schema = app.openapi()
+    json_post = schema["paths"]["/v1/analyze/json"]["post"]
+    examples = json_post["requestBody"]["content"]["application/json"]["examples"]
+    assert "file_path_request" in examples
+    assert "base64_request" in examples
+    assert "200" in schema["paths"]["/v1/analyze"]["post"]["responses"]
