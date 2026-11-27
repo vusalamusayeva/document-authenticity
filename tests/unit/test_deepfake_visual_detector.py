@@ -49,3 +49,16 @@ def test_load_model_raises_when_torch_unavailable(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(ModelUnavailableError):
         detector.load_model()
+
+def test_load_model_raises_when_nn_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import doc_auth.deepfake.visual_detector as vd_mod
+    from doc_auth.deepfake.exceptions import ModelUnavailableError
+
+    ckpt = tmp_path / "dummy_weights.pt"
+    ckpt.write_bytes(b"placeholder")
+
+    monkeypatch.setattr(vd_mod, "nn", None)
+    detector = vd_mod.VisualDetector(checkpoint_path=str(ckpt))
+
+    with pytest.raises(ModelUnavailableError):
+        detector.load_model()
