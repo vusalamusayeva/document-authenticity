@@ -47,7 +47,6 @@ def test_visual_detector_rejects_unsupported_extension(tmp_path: Path) -> None:
 from pathlib import Path
 import numpy as np
 import pytest
-import torch
 import torch.nn as nn
 from doc_auth.deepfake.exceptions import ModelUnavailableError
 from doc_auth.deepfake.visual_detector import VisualDetector
