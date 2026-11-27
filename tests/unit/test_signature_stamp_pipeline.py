@@ -1,39 +1,47 @@
 ﻿from pathlib import Path
-import inspect
 import cv2
 import numpy as np
+import pytest
 
-from doc_auth.signature_stamp.pipeline import analyze_signature_stamp
+from doc_auth.signature_stamp.exceptions import SignatureStampError
+from doc_auth.signature_stamp.pipeline import (
+    _extract_risk_value,
+    _sanitize_file_id,
+    analyze_signature_stamp,
+)
 
 
-def _make_doc_image(tmp_path: Path):
-    img = np.ones((240, 360, 3), dtype=np.uint8) * 245
+def _make_doc_image() -> np.ndarray:
+    img = np.ones((260, 380, 3), dtype=np.uint8) * 245
     cv2.putText(img, "APPROVED DOCUMENT", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (25, 25, 25), 2)
-    cv2.ellipse(img, (260, 150), (45, 45), 0, 0, 360, (180, 30, 30), 2)
-    cv2.putText(img, "SEAL", (238, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 30, 30), 2)
-    cv2.line(img, (40, 165), (150, 135), (30, 30, 160), 2)
-    cv2.line(img, (150, 135), (185, 160), (30, 30, 160), 2)
+    cv2.ellipse(img, (270, 160), (45, 45), 0, 0, 360, (180, 30, 30), 2)
+    cv2.putText(img, "SEAL", (248, 165), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 30, 30), 2)
+    cv2.line(img, (40, 175), (155, 140), (30, 30, 160), 2)
+    cv2.line(img, (155, 140), (195, 170), (30, 30, 160), 2)
+    return img
 
-    img_path = tmp_path / "sig_stamp_doc.png"
-    cv2.imwrite(str(img_path), img)
-    return img, str(img_path)
+
+def test_sanitize_and_extract_helpers() -> None:
+    assert _sanitize_file_id("  doc_123  ") == "doc_123"
+    with pytest.raises(SignatureStampError):
+        _sanitize_file_id("../secret")
+    with pytest.raises(SignatureStampError):
+        _sanitize_file_id("")
+
+    assert _extract_risk_value({"score": 1.5}, ("score",)) == 1.0
+    assert _extract_risk_value({"score": -0.2}, ("score",)) == 0.0
+    assert _extract_risk_value(None, ("score",)) == 0.0
 
 
 def test_analyze_signature_stamp_workflow(tmp_path: Path) -> None:
-    img, img_path = _make_doc_image(tmp_path)
-    sig = inspect.signature(analyze_signature_stamp)
-    params = list(sig.parameters.values())
+    img = _make_doc_image()
+    out_dir = tmp_path / "outputs"
 
-    result = None
-    for candidate in (img_path, img):
-        try:
-            if len(params) == 1:
-                result = analyze_signature_stamp(candidate)
-            else:
-                result = analyze_signature_stamp(candidate)
-            if result is not None:
-                break
-        except Exception:
-            continue
+    result = analyze_signature_stamp(
+        image=img,
+        file_id="doc_001",
+        reference_signatures=[img[130:185, 35:205].copy()],
+        output_dir=str(out_dir),
+    )
 
     assert result is not None
