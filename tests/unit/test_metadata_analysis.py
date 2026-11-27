@@ -1,4 +1,6 @@
 ﻿from pathlib import Path
+import os
+import time
 import pytest
 import cv2
 import numpy as np
@@ -42,3 +44,47 @@ def test_metadata_analyzer_image_and_corrupt_file(tmp_path: Path) -> None:
     bad_img.write_bytes(b"not-a-valid-png")
     _, bad_errors = analyzer._extract_embedded_metadata(bad_img, ".png")
     assert len(bad_errors) >= 1
+
+
+def test_metadata_analyze_signals_and_wrappers(tmp_path: Path, monkeypatch) -> None:
+    analyzer = MetadataAnalyzer()
+
+    missing_res = analyzer.analyze(tmp_path / "does_not_exist.pdf")
+    assert missing_res["status"] == "not_found"
+    assert missing_res["suspicious"] is None
+
+    empty_file = tmp_path / "empty.pdf"
+    empty_file.write_bytes(b"")
+    empty_res = analyzer.analyze(empty_file)
+    assert empty_res["suspicious"] is True
+    assert any(sig["field"] == "size_bytes" for sig in empty_res["suspicious_signals"])
+
+    no_ext = tmp_path / "noext_file"
+    no_ext.write_bytes(b"plain text content")
+    no_ext_res = analyzer.analyze(no_ext)
+    assert no_ext_res["suspicious"] is True
+    assert any(sig["field"] == "extension" for sig in no_ext_res["suspicious_signals"])
+
+    doc_file = tmp_path / "edited.pdf"
+    doc_file.write_bytes(b"%PDF-1.4 fake test")
+
+    now = time.time()
+    os.utime(doc_file, (now - 120, now - 120))
+    stat = doc_file.stat()
+    os.utime(doc_file, (stat.st_atime, stat.st_ctime - 10.0))
+
+    monkeypatch.setattr(
+        analyzer,
+        "_extract_embedded_metadata",
+        lambda _p, _ext: ({"pdf_producer": "Adobe Photoshop 2026"}, []),
+    )
+
+    res = analyzer.analyze(doc_file)
+    assert res["status"] == "success"
+    assert res["suspicious"] is True
+    assert any(sig["field"] == "modified_at_utc" for sig in res["suspicious_signals"])
+    assert any(sig["field"] == "pdf_producer" for sig in res["suspicious_signals"])
+
+    assert analyzer.extract(doc_file)["suspicious"] is True
+    assert analyzer.inspect(doc_file)["suspicious"] is True
+    assert analyzer(doc_file)["suspicious"] is True
