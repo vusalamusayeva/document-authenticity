@@ -5,16 +5,18 @@ import os
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -22,17 +24,17 @@ class JobRecord:
     job_id: str
     status: str = "queued"
     created_at: str = field(default_factory=_utc_now)
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    error_type: Optional[str] = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    error_type: str | None = None
     attempts: int = 0
     max_retries: int = 1
-    timeout_sec: Optional[float] = None
-    payload: Optional[Dict[str, Any]] = None
+    timeout_sec: float | None = None
+    payload: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
             "status": self.status,
@@ -49,7 +51,7 @@ class JobRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "JobRecord":
+    def from_dict(cls, data: dict[str, Any]) -> JobRecord:
         return cls(
             job_id=str(data["job_id"]),
             status=str(data.get("status", "queued")),
@@ -70,12 +72,12 @@ class JobQueue:
     def __init__(
         self,
         maxsize: int = 0,
-        store_path: Optional[str | Path] = None,
+        store_path: str | Path | None = None,
         recover_running_on_load: bool = True,
     ) -> None:
         self._queue: Queue[tuple[str, Callable[[], Any]]] = Queue(maxsize=maxsize)
-        self._jobs: Dict[str, JobRecord] = {}
-        self._handlers: Dict[str, Callable[[], Any]] = {}
+        self._jobs: dict[str, JobRecord] = {}
+        self._handlers: dict[str, Callable[[], Any]] = {}
         self._lock = threading.Lock()
         self.store_path = Path(store_path) if store_path is not None else None
         if self.store_path is not None:
@@ -126,10 +128,10 @@ class JobQueue:
     def submit(
         self,
         fn: Callable[[], Any],
-        job_id: Optional[str] = None,
+        job_id: str | None = None,
         max_retries: int = 1,
-        timeout_sec: Optional[float] = None,
-        payload: Optional[Dict[str, Any]] = None,
+        timeout_sec: float | None = None,
+        payload: dict[str, Any] | None = None,
         idempotent: bool = True,
     ) -> str:
         if not callable(fn):
@@ -154,7 +156,7 @@ class JobQueue:
         self._queue.put((jid, fn))
         return jid
 
-    def pop_next(self, timeout: float = 0.2) -> Optional[tuple[str, Callable[[], Any]]]:
+    def pop_next(self, timeout: float = 0.2) -> tuple[str, Callable[[], Any]] | None:
         try:
             jid, fn = self._queue.get(timeout=timeout)
             with self._lock:
@@ -209,7 +211,7 @@ class JobQueue:
                 rec.finished_at = _utc_now()
                 self._persist_locked()
 
-    def get_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_status(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             rec = self._jobs.get(job_id)
             return rec.to_dict() if rec is not None else None
@@ -241,7 +243,7 @@ class BackgroundWorker:
             t.start()
             self._threads.append(t)
 
-    def _run_with_timeout(self, fn: Callable[[], Any], timeout_sec: Optional[float]) -> Any:
+    def _run_with_timeout(self, fn: Callable[[], Any], timeout_sec: float | None) -> Any:
         if timeout_sec is None:
             return fn()
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -260,11 +262,11 @@ class BackgroundWorker:
             try:
                 res = self._run_with_timeout(fn, timeout_sec=timeout_sec)
                 self.job_queue.mark_completed(job_id, res)
-            except FutureTimeoutError as exc:
+            except FutureTimeoutError:
                 timeout_exc = TimeoutError(f"Job {timeout_sec}s limitini a?d?.")
                 if not self.job_queue.requeue_for_retry(job_id, timeout_exc):
                     self.job_queue.mark_failed(job_id, timeout_exc)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 if not self.job_queue.requeue_for_retry(job_id, exc):
                     self.job_queue.mark_failed(job_id, exc)
             finally:
