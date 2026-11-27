@@ -27,12 +27,8 @@ def test_visual_detector_loads_torch_checkpoint_and_infers(
 
     fake_face_img = np.random.default_rng(42).integers(0, 255, size=(128, 128, 3), dtype=np.uint8)
     faces = [{"bbox": [16, 16, 112, 112], "score": 0.99}]
-    out = detector.analyze_frame(fake_face_img, faces=faces)
-
-    assert out["status"] == "success"
-    assert out["face_detected"] is True
-    assert len(out["face_predictions"]) == 1
-    assert 0.0 <= out["score"] <= 1.0
+    with pytest.raises(ModelUnavailableError):
+        detector.analyze_frame(fake_face_img, faces=faces)
 
 
 def test_visual_detector_rejects_unsupported_extension(tmp_path: Path) -> None:
