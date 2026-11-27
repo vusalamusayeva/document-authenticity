@@ -74,3 +74,11 @@ def test_face_detector_wrapper_and_errors(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(cv2, "__file__", str(tmp_path / "other" / "__init__.py"))
     with pytest.raises(ModelUnavailableError):
         fd_mod._resolve_cascade_path()
+import numpy as np
+
+from doc_auth.deepfake.face_detector import detect_faces
+
+
+def test_detect_faces_returns_empty_for_zero_height_or_width() -> None:
+    zero_h = np.empty((0, 10), dtype=np.uint8)
+    assert detect_faces(zero_h) == []
