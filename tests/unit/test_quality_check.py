@@ -126,5 +126,4 @@ from doc_auth.preprocessing.quality_check import _QualityDict
 
 def test_quality_dict_getattr_is_acceptable_fallback() -> None:
     q = _QualityDict({"passed": True})
-    del q["is_acceptable"]
-    assert q.is_acceptable is True
+    assert q.__getattr__("is_acceptable") is True
