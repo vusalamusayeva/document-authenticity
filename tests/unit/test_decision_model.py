@@ -31,3 +31,12 @@ def test_decision_model_tampered_and_suspicious_signals() -> None:
     assert model.predict(signals) == res
     assert model.analyze(signals) == res
     assert model(signals) == res
+from doc_auth.fusion.decision_model import DecisionModel
+
+
+def test_decide_returns_inconclusive_when_no_valid_signals() -> None:
+    model = DecisionModel()
+    result = model.decide({"metadata": {"status": "skipped"}, "ocr": {"status": "failed"}})
+    assert result["status"] == "inconclusive"
+    assert result["decision"] == "inconclusive"
+    assert result["risk_score"] is None
