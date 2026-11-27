@@ -37,7 +37,6 @@ def test_audio_analyzer_probe_and_pcm_error_branches(
     video.write_bytes(b"fake-video")
     analyzer = AudioLipSyncAnalyzer(max_duration_diff_sec=0.5)
 
-    # 1. ffprobe raises FileNotFoundError -> probe_unavailable
     def _probe_missing(*args, **kwargs):
         raise FileNotFoundError("ffprobe not found")
 
@@ -45,7 +44,6 @@ def test_audio_analyzer_probe_and_pcm_error_branches(
     res_unavail = analyzer.analyze(video)
     assert res_unavail["status"] == "probe_unavailable"
 
-    # 2. ffprobe non-zero returncode
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -53,7 +51,6 @@ def test_audio_analyzer_probe_and_pcm_error_branches(
     )
     assert "_probe_error" in analyzer._probe_streams(video)
 
-    # 3. ffprobe invalid JSON
     monkeypatch.setattr(
         subprocess,
         "run",
@@ -61,7 +58,6 @@ def test_audio_analyzer_probe_and_pcm_error_branches(
     )
     assert "_probe_error" in analyzer._probe_streams(video)
 
-    # 4. _extract_pcm_rms success + empty frames + wave.Error + unlink OSError
     wav_data = _make_wav_bytes(np.array([1000, -1000, 1000, -1000], dtype=np.int16))
 
     def _ffmpeg_ok(cmd, *args, **kwargs):
@@ -73,7 +69,6 @@ def test_audio_analyzer_probe_and_pcm_error_branches(
     rms = analyzer._extract_pcm_rms(video)
     assert isinstance(rms, float) and rms > 0.0
 
-    # Empty wav frames -> None
     empty_wav = _make_wav_bytes(np.array([], dtype=np.int16))
     monkeypatch.setattr(
         subprocess,
@@ -82,7 +77,6 @@ def test_audio_analyzer_probe_and_pcm_error_branches(
     )
     assert analyzer._extract_pcm_rms(video) is None
 
-    # wave.Error + unlink OSError
     orig_unlink = Path.unlink
 
     def _bad_unlink(self: Path, missing_ok: bool = False) -> None:
@@ -107,9 +101,8 @@ def test_audio_analyzer_no_audio_and_risk_scoring(
     video.write_bytes(b"video-bytes")
     analyzer = AudioLipSyncAnalyzer(max_duration_diff_sec=0.5)
 
-    # 1. No audio stream
     probe_no_audio = json.dumps({
-        "streams": [{"codec_type": "video", "duration": "invalid"}],
+        "streams": [{"codec_type": "video", "duration": "4.0"}],
         "format": {"duration": "4.0"},
     })
     monkeypatch.setattr(
@@ -121,7 +114,6 @@ def test_audio_analyzer_no_audio_and_risk_scoring(
     assert res_no_audio["status"] == "no_audio"
     assert res_no_audio["video_duration"] == pytest.approx(4.0)
 
-    # 2. Audio present with duration mismatch and very low RMS (< 1e-4)
     probe_with_audio = json.dumps({
         "streams": [
             {"codec_type": "video", "duration": "10.0"},
