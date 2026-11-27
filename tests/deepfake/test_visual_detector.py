@@ -101,3 +101,105 @@ def test_load_model_torch_invalid_objects_and_score_without_weights(tmp_path: Pa
     patch = np.full((16, 16, 3), 128, dtype=np.uint8)
     with pytest.raises(ModelUnavailableError):
         det._compute_region_score(patch)
+
+
+def test_visual_detector_torch_module_and_state_dict_branches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import types
+    import doc_auth.deepfake.visual_detector as vd_mod
+
+    class _FakeModule:
+        def __init__(self) -> None:
+            self.moved_to = None
+            self.eval_called = False
+
+        def to(self, device: str):
+            self.moved_to = device
+            return self
+
+        def eval(self):
+            self.eval_called = True
+            return self
+
+    fake_nn = types.SimpleNamespace(Module=_FakeModule)
+    monkeypatch.setattr(vd_mod, "nn", fake_nn, raising=False)
+
+    mod_ckpt = tmp_path / "fake_module.pt"
+    mod_ckpt.write_bytes(b"pt-module")
+
+    mod_instance = _FakeModule()
+    fake_torch_mod = types.SimpleNamespace(load=lambda *a, **kw: mod_instance)
+    monkeypatch.setattr(vd_mod, "torch", fake_torch_mod, raising=False)
+
+    det_mod = VisualDetector(checkpoint_path=mod_ckpt, device="cpu")
+    res_mod = det_mod.load_model()
+    assert res_mod["backend"] == "torch_checkpoint"
+    assert res_mod["status"] == "loaded"
+    assert mod_instance.moved_to == "cpu"
+    assert mod_instance.eval_called is True
+    # Cached load path
+    assert det_mod.load_model()["status"] == "loaded"
+
+    # Line 220: _weights_data is None while _model is set
+    patch = np.full((16, 16, 3), 128, dtype=np.uint8)
+    with pytest.raises(ModelUnavailableError):
+        det_mod._compute_region_score(patch)
+
+    # Prefixed state_dict
+    sd_ckpt = tmp_path / "fake_sd.pth"
+    sd_ckpt.write_bytes(b"pt-sd")
+    fake_torch_sd = types.SimpleNamespace(
+        load=lambda *a, **kw: {"state_dict": {"module.conv.weight": [1.0], "bias": [0.0]}}
+    )
+    monkeypatch.setattr(vd_mod, "torch", fake_torch_sd, raising=False)
+    det_sd = VisualDetector(checkpoint_path=sd_ckpt)
+    res_sd = det_sd.load_model()
+    assert res_sd["backend"] == "torch_checkpoint"
+    assert "conv.weight" in det_sd._model
+    assert "module.conv.weight" not in det_sd._model
+
+    # model_state_dict fallback
+    msd_ckpt = tmp_path / "fake_msd.pt"
+    msd_ckpt.write_bytes(b"pt-msd")
+    fake_torch_msd = types.SimpleNamespace(
+        load=lambda *a, **kw: {"model_state_dict": {"head.weight": [2.0]}}
+    )
+    monkeypatch.setattr(vd_mod, "torch", fake_torch_msd, raising=False)
+    det_msd = VisualDetector(checkpoint_path=msd_ckpt)
+    assert det_msd.load_model()["backend"] == "torch_checkpoint"
+    assert "head.weight" in det_msd._model
+
+    # Direct dict state_dict
+    raw_ckpt = tmp_path / "fake_raw.pt"
+    raw_ckpt.write_bytes(b"pt-raw")
+    fake_torch_raw = types.SimpleNamespace(load=lambda *a, **kw: {"w": [3.0]})
+    monkeypatch.setattr(vd_mod, "torch", fake_torch_raw, raising=False)
+    det_raw = VisualDetector(checkpoint_path=raw_ckpt)
+    assert det_raw.load_model()["backend"] == "torch_checkpoint"
+    assert det_raw._model == {"w": [3.0]}
+
+    # Empty state_dict -> ModelUnavailableError
+    empty_ckpt = tmp_path / "fake_empty.pt"
+    empty_ckpt.write_bytes(b"pt-empty")
+    fake_torch_empty = types.SimpleNamespace(load=lambda *a, **kw: {"state_dict": {}})
+    monkeypatch.setattr(vd_mod, "torch", fake_torch_empty, raising=False)
+    with pytest.raises(ModelUnavailableError):
+        VisualDetector(checkpoint_path=empty_ckpt).load_model()
+
+    # Non-dict, non-module object -> ModelUnavailableError
+    bad_obj_ckpt = tmp_path / "fake_bad_obj.pt"
+    bad_obj_ckpt.write_bytes(b"pt-bad")
+    fake_torch_bad_obj = types.SimpleNamespace(load=lambda *a, **kw: ["invalid"])
+    monkeypatch.setattr(vd_mod, "torch", fake_torch_bad_obj, raising=False)
+    with pytest.raises(ModelUnavailableError):
+        VisualDetector(checkpoint_path=bad_obj_ckpt).load_model()
+
+    # torch.load raises -> ModelUnavailableError
+    err_ckpt = tmp_path / "fake_err.pt"
+    err_ckpt.write_bytes(b"pt-err")
+    def _boom(*a, **kw):
+        raise RuntimeError("corrupt archive")
+    monkeypatch.setattr(vd_mod, "torch", types.SimpleNamespace(load=_boom), raising=False)
+    with pytest.raises(ModelUnavailableError):
+        VisualDetector(checkpoint_path=err_ckpt).load_model()
