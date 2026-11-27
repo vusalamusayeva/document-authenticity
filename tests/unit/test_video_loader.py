@@ -50,11 +50,16 @@ def test_probe_video_metadata_ffprobe_and_fallbacks(tmp_path: Path, monkeypatch:
     vid = tmp_path / "sample.mp4"
     vid.write_bytes(b"fake-video-bytes")
 
-    # ffprobe not found -> fallback to cv2.VideoCapture
+    # ffprobe not found -> raises VideoLoadError
     def _raise_fnf(*args, **kwargs):
         raise FileNotFoundError("ffprobe missing")
 
     monkeypatch.setattr(subprocess, "run", _raise_fnf)
+    with pytest.raises(VideoLoadError):
+        probe_video_metadata(vid)
+
+    # ffprobe non-zero returncode -> fallback to cv2.VideoCapture
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1, stdout=""))
     monkeypatch.setattr(
         cv2,
         "VideoCapture",
@@ -124,8 +129,8 @@ def test_probe_video_metadata_json_parsing_and_validation(tmp_path: Path, monkey
     with pytest.raises(VideoValidationError):
         probe_video_metadata(vid)
 
-    # Valid stream with fractional/non-fractional fps, invalid duration/nb_frames, and computed frame_count
-    payload = {
+    # Invalid stream duration/nb_frames falls back to 0.0 / 0
+    invalid_meta_payload = {
         "streams": [
             {
                 "codec_type": "video",
@@ -136,12 +141,35 @@ def test_probe_video_metadata_json_parsing_and_validation(tmp_path: Path, monkey
                 "nb_frames": "invalid",
             }
         ],
-        "format": {"duration": "2.5"},
+        "format": {},
     }
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda *a, **kw: SimpleNamespace(returncode=0, stdout=json.dumps(payload)),
+        lambda *a, **kw: SimpleNamespace(returncode=0, stdout=json.dumps(invalid_meta_payload)),
+    )
+    meta_invalid = probe_video_metadata(vid)
+    assert meta_invalid["fps"] == 30.0
+    assert meta_invalid["duration"] == pytest.approx(0.0)
+    assert meta_invalid["frame_count"] == 0
+
+    # Valid stream duration with missing nb_frames computes frame_count from duration * fps
+    computed_frames_payload = {
+        "streams": [
+            {
+                "codec_type": "video",
+                "width": 1280,
+                "height": 720,
+                "r_frame_rate": "60/2",
+                "duration": "2.5",
+            }
+        ],
+        "format": {},
+    }
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(returncode=0, stdout=json.dumps(computed_frames_payload)),
     )
     meta = probe_video_metadata(vid)
     assert meta["fps"] == 30.0
