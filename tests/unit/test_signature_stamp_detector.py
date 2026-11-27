@@ -7,7 +7,7 @@ from doc_auth.signature_stamp.exceptions import SignatureStampError
 from doc_auth.signature_stamp.schemas import BoundingBox
 
 
-def test_detector_errors_and_empty_signature() -> None:
+def test_detector_errors_and_empty_signature(monkeypatch: pytest.MonkeyPatch) -> None:
     det = SignatureStampDetector(confidence_threshold=0.3)
 
     with pytest.raises(SignatureStampError):
@@ -16,10 +16,14 @@ def test_detector_errors_and_empty_signature() -> None:
     blank = np.full((120, 120, 3), 255, dtype=np.uint8)
     assert det.detect_signature(blank) is None
 
-    # Force internal error inside detection loop
-    bad_img = np.zeros((10, 10, 3), dtype=np.uint8)
+    # Force internal error inside detection pipeline
+    monkeypatch.setattr(
+        cv2,
+        "adaptiveThreshold",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
     with pytest.raises(SignatureStampError):
-        det.detect_stamps_and_signatures(bad_img)  # type: ignore[arg-type]
+        det.detect_stamps_and_signatures(blank)
 
 
 def test_detector_finds_stamp_and_signature() -> None:
