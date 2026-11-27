@@ -45,3 +45,70 @@ def test_analyze_signature_stamp_workflow(tmp_path: Path) -> None:
     )
 
     assert result is not None
+from pathlib import Path
+from typing import Any
+import numpy as np
+import pytest
+
+from doc_auth.signature_stamp import pipeline as ss_pipe
+from doc_auth.signature_stamp.pipeline import _extract_risk_value, _sanitize_file_id, analyze_signature_stamp
+
+
+class _DummyBox:
+    def __init__(self, coords: list[int]) -> None:
+        self._coords = coords
+
+    def as_int_list(self) -> list[int]:
+        return list(self._coords)
+
+    def as_list(self) -> list[int]:
+        return list(self._coords)
+
+
+def test_signature_stamp_helpers_and_similarity_branches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert _sanitize_file_id(12345) == "12345"  # type: ignore[arg-type]
+    assert _extract_risk_value({"other": 0.9}, ("score", "forgery_probability")) == 0.0
+
+    img = np.full((120, 120, 3), 255, dtype=np.uint8)
+    ref = np.full((60, 60, 3), 255, dtype=np.uint8)
+
+    class _FakeDetector:
+        def detect_stamps_and_signatures(self, _img: np.ndarray) -> dict[str, Any]:
+            return {
+                "signatures": [{"bbox": _DummyBox([10, 10, 80, 50]), "confidence": 0.9}],
+                "stamps": [],
+            }
+
+    scores_iter = iter([0.85, 0.55])
+
+    class _FakeSim:
+        @staticmethod
+        def compare(_a: Any, _b: Any) -> dict[str, Any]:
+            val = next(scores_iter)
+            return {"total_similarity": val, "score": val}
+
+    monkeypatch.setattr(ss_pipe, "SignatureStampDetector", _FakeDetector)
+    monkeypatch.setattr(ss_pipe, "preprocess_signature", lambda arr, bbox=None: arr)
+    monkeypatch.setattr(ss_pipe, "analyze_texture", lambda _crop: {"score": 0.0})
+    monkeypatch.setattr(ss_pipe, "SignatureSimilarity", _FakeSim)
+    monkeypatch.setattr(ss_pipe, "visualize_results", lambda _img, _cands, out_p: out_p)
+
+    res_match = analyze_signature_stamp(
+        img,
+        file_id=101,  # type: ignore[arg-type]
+        reference_signatures=[ref],
+        output_dir=str(tmp_path / "out1"),
+    )
+    assert res_match.status == "success"
+    assert res_match.signature_verifications[0]["status"] == "match"
+
+    res_uncertain = analyze_signature_stamp(
+        img,
+        file_id=102,  # type: ignore[arg-type]
+        reference_signatures=[ref],
+        output_dir=str(tmp_path / "out2"),
+    )
+    assert res_uncertain.status == "success"
+    assert res_uncertain.signature_verifications[0]["status"] == "uncertain"
