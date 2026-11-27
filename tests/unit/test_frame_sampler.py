@@ -23,7 +23,8 @@ def _make_video(video_path: Path, num_frames: int = 10) -> Path:
 def test_frame_sampler_and_helper(tmp_path: Path) -> None:
     vid_path = _make_video(tmp_path / "sample.mp4", num_frames=10)
     cfg = FrameSamplingConfig()
-    sampler = FrameSampler(config=cfg)
+    assert cfg is not None
+    sampler = FrameSampler()
 
     sampled = list(sampler.sample(vid_path))
     assert len(sampled) >= 1
