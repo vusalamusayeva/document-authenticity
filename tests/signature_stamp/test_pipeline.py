@@ -1,7 +1,9 @@
-import numpy as np
 import os
-import pytest
+
+import numpy as np
+
 from doc_auth.signature_stamp.pipeline import analyze_signature_stamp
+
 
 def test_pipeline_success():
     img = np.ones((300, 300, 3), dtype=np.uint8) * 255
