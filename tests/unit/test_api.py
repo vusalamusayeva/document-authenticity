@@ -153,3 +153,54 @@ def test_document_router_and_app_endpoints(
     c_job_err = _router_client(doc_api.create_document_router(analysis_service=_DummyService(mode="raise_runtime")))
     assert c_job_err.post("/v1/jobs", files={"file": ("doc.png", png_bytes, "image/png")}).status_code == 500
     monkeypatch.setattr(Path, "unlink", orig_unlink)
+
+
+def test_api_readiness_unlink_oserror_json_500_and_job_http_err(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/tesseract")
+
+    def _boom_run(*_args, **_kwargs):
+        raise RuntimeError("list-langs failure")
+
+    monkeypatch.setattr(doc_api._sp, "run", _boom_run)
+    ok, payload = doc_api.check_readiness_state(_DummyService(ready=True), required_langs=("eng",))
+    assert ok is False
+    assert payload["installed_langs"] == []
+
+    orig_unlink = Path.unlink
+
+    def _flaky_unlink(self: Path, missing_ok: bool = False) -> None:
+        if "tmp_uploads" in str(self) or self.parent.name == "tmp_uploads":
+            raise OSError("locked file")
+        return orig_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", _flaky_unlink)
+
+    bad_client = _router_client(doc_api.create_document_router(analysis_service=_DummyService(mode="bad_type")))
+    resp_500 = bad_client.post(
+        "/v1/analyze",
+        files={"file": ("doc.pdf", b"%PDF-1.4\n%EOF\n", "application/pdf")},
+    )
+    assert resp_500.status_code == 500
+
+    tiny_client = _router_client(
+        doc_api.create_document_router(analysis_service=_DummyService(mode="bad_type"), max_upload_bytes=4)
+    )
+    resp_413 = tiny_client.post(
+        "/v1/analyze",
+        files={"file": ("doc.pdf", b"%PDF-1.4-large", "application/pdf")},
+    )
+    assert resp_413.status_code == 413
+
+    sample = tmp_path / "sample.pdf"
+    sample.write_bytes(b"%PDF-1.4\n%EOF\n")
+    resp_json_500 = bad_client.post("/v1/analyze/json", json={"file_path": str(sample)})
+    assert resp_json_500.status_code == 500
+
+    resp_job_400 = bad_client.post(
+        "/v1/jobs",
+        files={"file": ("bad.txt", b"hello", "text/plain")},
+    )
+    assert resp_job_400.status_code == 400
+    monkeypatch.setattr(Path, "unlink", orig_unlink)
