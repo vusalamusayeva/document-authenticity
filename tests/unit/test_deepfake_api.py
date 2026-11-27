@@ -211,3 +211,33 @@ def test_deepfake_readiness_ready_and_default_runner_unavailable(
             if callable(cell.cell_contents) and getattr(cell.cell_contents, "__name__", "") == "_default_runner":
                 cell.cell_contents(sample)
                 break
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+import pytest
+
+from doc_auth.deepfake import api as df_api
+
+
+def test_default_runner_executes_active_pipeline_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DummyPipeline:
+        def run(self, path: object) -> dict[str, object]:
+            return {"status": "ok", "path": str(path)}
+
+    monkeypatch.setattr(
+        df_api,
+        "build_deepfake_pipeline_from_config",
+        lambda **_kwargs: (_DummyPipeline(), {"model": "dummy"}),
+    )
+
+    app = FastAPI()
+    df_api.attach_deepfake_router(app)
+    client = TestClient(app)
+
+    resp = client.post(
+        "/deepfake/analyze",
+        files={"file": ("clip.mp4", b"fake-video-bytes", "video/mp4")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
