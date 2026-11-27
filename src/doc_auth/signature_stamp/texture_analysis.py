@@ -1,8 +1,10 @@
 import cv2
 import numpy as np
+
 from .exceptions import SignatureStampError
 
-def analyze_texture(image: np.ndarray, bbox: tuple = None) -> dict:
+
+def analyze_texture(image: np.ndarray, bbox: tuple[int, int, int, int] | None = None) -> dict:
     try:
         if image is None or image.size == 0:
             raise SignatureStampError("Doku analizi üçün şəkil tapılmadı.")
@@ -46,4 +48,4 @@ def analyze_texture(image: np.ndarray, bbox: tuple = None) -> dict:
         }
 
     except Exception as e:
-        raise SignatureStampError(f"Doku analizi zamanı xəta: {str(e)}")
+        raise SignatureStampError(f"Doku analizi zamanı xəta: {e!s}")

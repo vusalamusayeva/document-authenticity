@@ -1,8 +1,10 @@
 import cv2
 import numpy as np
+
 from .exceptions import SignatureStampError
 
-def preprocess_signature(image: np.ndarray, bbox: tuple = None) -> np.ndarray:
+
+def preprocess_signature(image: np.ndarray, bbox: tuple[int, int, int, int] | None = None) -> np.ndarray:
     try:
         if image is None or image.size == 0:
             raise SignatureStampError("Giriş şəkli boşdur.")
@@ -46,4 +48,4 @@ def preprocess_signature(image: np.ndarray, bbox: tuple = None) -> np.ndarray:
         return standard_img
 
     except Exception as e:
-        raise SignatureStampError(f"İmza ön işlənməsi zamanı xəta: {str(e)}")
+        raise SignatureStampError(f"İmza ön işlənməsi zamanı xəta: {e!s}")
