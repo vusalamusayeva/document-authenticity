@@ -38,7 +38,8 @@ def test_multiple_faces_same_frame_and_scene_cut() -> None:
     res = analyzer.analyze(tracked)
     assert res["tracks_analyzed"] >= 2
     assert res["scene_cuts_ignored"] >= 1
-    assert np.isfinite(res["temporal_score"])from doc_auth.deepfake.temporal_analysis import TemporalAnalyzer, compute_iou
+    assert isinstance(res["temporal_score"], float)
+from doc_auth.deepfake.temporal_analysis import TemporalAnalyzer, compute_iou
 
 
 def test_compute_iou_short_box_and_zero_union() -> None:
