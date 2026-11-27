@@ -167,23 +167,30 @@ def test_visual_detector_load_model_unsupported_suffix(tmp_path: Path) -> None:
     with pytest.raises(ModelUnavailableError):
         detector.load_model()
 
-def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch, tmp_path):
+def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch):
+    import importlib
+    import sys
+    import types
     import pytest
     from doc_auth.deepfake import visual_detector as vd_mod
     from doc_auth.deepfake.exceptions import ModelUnavailableError
 
-    class _DummyTorch:
-        @staticmethod
-        def load(_path, map_location=None):
-            return {}
+    fake_torch = types.ModuleType("torch")
+    fake_nn = types.ModuleType("torch.nn")
+    fake_nn.Module = object  # type: ignore[attr-defined]
+    fake_torch.nn = fake_nn  # type: ignore[attr-defined]
+    fake_torch.load = lambda *_a, **_kw: {}  # type: ignore[attr-defined]
 
-    class _DummyNN:
-        Module = object
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "torch.nn", fake_nn)
+    reloaded = importlib.reload(vd_mod)
+    assert reloaded.nn is fake_nn
 
-    monkeypatch.setattr(vd_mod, "torch", _DummyTorch())
-    monkeypatch.setattr(vd_mod, "nn", _DummyNN())
-    assert vd_mod.nn is not None
-    missing_ckpt = tmp_path / "nonexistent_ckpt.onnx"
-    det = vd_mod.VisualDetector(checkpoint_path=str(missing_ckpt))
-    with pytest.raises(ModelUnavailableError):
-        det.verify_model_weights()
+    try:
+        det = reloaded.VisualDetector(checkpoint_path=None)
+        with pytest.raises(ModelUnavailableError):
+            det.verify_model_weights()
+    finally:
+        monkeypatch.delitem(sys.modules, "torch", raising=False)
+        monkeypatch.delitem(sys.modules, "torch.nn", raising=False)
+        importlib.reload(vd_mod)
