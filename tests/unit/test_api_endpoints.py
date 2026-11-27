@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.main import app
+from doc_auth.api import create_app
 from doc_auth.api import create_document_router
 from doc_auth.deepfake.api import attach_deepfake_router
 
