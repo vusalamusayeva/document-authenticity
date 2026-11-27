@@ -1,76 +1,126 @@
 ﻿from pathlib import Path
-import inspect
+import pickle
+
 import cv2
 import numpy as np
+import pytest
 
 from doc_auth.classification.document_classifier import DocumentClassifier
 
 
-def _make_doc_image(img_path: Path, label_val: int) -> Path:
-    bg = 245 if label_val == 0 else 210
-    img = np.full((220, 340, 3), bg, dtype=np.uint8)
-    step = 22 if label_val == 0 else 44
-    for y in range(25, 195, step):
-        cv2.line(img, (20, y), (310, y), (30, 30, 30), 2)
-    cv2.putText(img, f"DOC-{label_val}", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (10, 10, 10), 2)
-    cv2.imwrite(str(img_path), img)
-    return img_path
+def test_init_resolve_image_and_feature_extraction(tmp_path: Path) -> None:
+    clf = DocumentClassifier({"classes": ["passport", "id_card"], "min_confidence": 0.6})
+    assert clf.classes[-1] == "unknown"
+    assert clf.min_confidence == pytest.approx(0.6)
+
+    # _resolve_image with ndarray, dict image key, dict path key, and disk file
+    img = np.full((32, 48, 3), 180, dtype=np.uint8)
+    cv2.rectangle(img, (4, 4), (44, 28), (40, 40, 40), 2)
+    assert clf._resolve_image(np.array([], dtype=np.uint8)) is None
+    assert clf._resolve_image({"image": img}) is not None
+    assert clf._resolve_image({"frame": img}) is not None
+
+    img_path = tmp_path / "doc_sample.png"
+    assert cv2.imwrite(str(img_path), img)
+    resolved_from_dict_path = clf._resolve_image({"document_path": str(img_path)})
+    assert isinstance(resolved_from_dict_path, np.ndarray)
+    assert resolved_from_dict_path.shape == (32, 48, 3)
+
+    # _extract_feature_vector with explicit features dict, image, and unresolvable input
+    feat_vec = clf._extract_feature_vector({"features": [0.5, 0.2, 1.0, 0.3]})
+    assert feat_vec.shape == (8,)
+    assert feat_vec[0] == pytest.approx(0.5)
+
+    img_vec = clf._extract_feature_vector(img)
+    assert img_vec.shape == (8,)
+    assert np.all(np.isfinite(img_vec))
+
+    zero_vec = clf._extract_feature_vector("nonexistent_file.png")
+    assert np.array_equal(zero_vec, np.zeros(8, dtype=np.float32))
 
 
-def _call_with_args(fn, *args):
-    sig = inspect.signature(fn)
-    params = [p for name, p in sig.parameters.items() if name != "self"]
-    if not params:
-        return fn()
-    return fn(*args[: len(params)])
+def test_fit_errors_predict_classify_evaluate_and_persistence(tmp_path: Path) -> None:
+    clf = DocumentClassifier({"min_confidence": 0.99})
 
+    # Unfitted checks
+    with pytest.raises(RuntimeError):
+        clf.predict_proba([{"features": [0.1] * 8}])
+    with pytest.raises(RuntimeError):
+        clf.evaluate([{"features": [0.1] * 8}], ["a"])
 
-def test_document_classifier_workflow(tmp_path: Path) -> None:
-    clf = DocumentClassifier()
-    assert clf is not None
+    # classify before fit returns inconclusive when input is valid
+    pre_fit = clf.classify({"features": [0.1] * 8})
+    assert pre_fit["status"] == "inconclusive"
+    assert pre_fit["document_type"] == "unknown"
 
-    samples = []
-    labels = []
-    for idx in range(6):
-        lbl = idx % 2
-        p = _make_doc_image(tmp_path / f"doc_{idx}.png", lbl)
-        samples.append(p)
-        labels.append("invoice" if lbl == 0 else "passport")
+    # classify with missing image/features returns not_applicable
+    na_res = clf.classify({"other": 123})
+    assert na_res["status"] == "not_applicable"
+    assert na_res["document_type"] is None
 
-    vec = _call_with_args(clf._extract_feature_vector, samples[0])
-    assert vec is not None
+    # fit validation errors
+    with pytest.raises(ValueError):
+        clf.fit(None, ["a"])
+    with pytest.raises(ValueError):
+        clf.fit([], [])
+    with pytest.raises(ValueError):
+        clf.fit([{"features": [0.1] * 8}], None)
+    with pytest.raises(ValueError):
+        clf.fit([{"features": [0.1] * 8}, {"features": [0.2] * 8}], ["only_one"])
+    with pytest.raises(ValueError):
+        clf.fit([{"features": [0.1] * 8}], ["a", "b"])
 
-    if hasattr(clf, "fit") and callable(clf.fit):
-        try:
-            clf.fit(samples, labels)
-        except Exception:
-            try:
-                clf.fit([str(p) for p in samples], labels)
-            except Exception:
-                pass
+    # Fit on distinct feature profiles
+    x_train = [
+        {"features": [1.0, 0.8, 0.7, 0.9, 0.2, 0.8, 0.8, 1.0]},
+        {"features": [1.1, 0.85, 0.75, 0.88, 0.22, 0.85, 0.85, 1.0]},
+        {"features": [-1.0, 0.1, 0.15, 0.3, 0.5, 0.1, 0.1, 0.9]},
+        {"features": [-1.1, 0.12, 0.18, 0.28, 0.52, 0.12, 0.12, 0.9]},
+    ]
+    y_train = ["passport", "passport", "id_card", "id_card"]
+    assert clf.fit(x_train, y_train) is clf
 
-    for m_name in ("predict_proba", "predict", "classify"):
-        method = getattr(clf, m_name, None)
-        if callable(method):
-            try:
-                out = _call_with_args(method, samples[0])
-                assert out is not None
-            except Exception:
-                pass
+    # predict_proba edge inputs: empty list, 3D ndarray, single dict
+    empty_probs = clf.predict_proba([])
+    assert empty_probs.shape == (0, len(clf.classes))
 
-    if hasattr(clf, "evaluate") and callable(clf.evaluate):
-        try:
-            ev = _call_with_args(clf.evaluate, samples[:2], labels[:2])
-            assert ev is not None
-        except Exception:
-            pass
+    img_3d = np.full((24, 32, 3), 150, dtype=np.uint8)
+    probs_3d = clf.predict_proba(img_3d)
+    assert probs_3d.shape == (1, len(clf.classes))
 
-    model_file = tmp_path / "classifier_state.pkl"
-    if hasattr(clf, "save") and callable(clf.save) and hasattr(clf, "load") and callable(clf.load):
-        try:
-            _call_with_args(clf.save, model_file)
-            if model_file.exists():
-                loaded = _call_with_args(clf.load, model_file)
-                assert loaded is not None
-        except Exception:
-            pass
+    probs_dict = clf.predict_proba({"features": [1.0, 0.8, 0.7, 0.9, 0.2, 0.8, 0.8, 1.0]})
+    assert probs_dict.shape == (1, len(clf.classes))
+
+    with pytest.raises(ValueError):
+        clf.predict_proba(None)
+
+    # predict with high min_confidence (0.99) yields "unknown"
+    assert clf.predict([]) == []
+    assert clf.predict(x_train[:1]) == ["unknown"]
+    low_conf_class = clf.classify(x_train[0])
+    assert low_conf_class["status"] == "inconclusive"
+    assert low_conf_class["document_type"] == "unknown"
+
+    # Lower min_confidence to verify confident prediction & evaluate
+    clf.min_confidence = 0.0
+    preds = clf.predict(x_train)
+    assert preds == y_train
+    confident_class = clf.classify(x_train[0])
+    assert confident_class["status"] == "success"
+    assert confident_class["document_type"] in clf.classes
+
+    metrics = clf.evaluate(x_train, y_train)
+    assert "labels" in metrics and "confusion_matrix" in metrics and "per_class" in metrics
+
+    # save and load + wrong type check
+    saved_path = tmp_path / "nested" / "clf.pkl"
+    clf.save(str(saved_path))
+    loaded = DocumentClassifier.load(str(saved_path))
+    assert isinstance(loaded, DocumentClassifier)
+    assert loaded.predict(x_train) == y_train
+
+    wrong_type_path = tmp_path / "wrong.pkl"
+    with open(wrong_type_path, "wb") as f:
+        pickle.dump({"not": "a classifier"}, f)
+    with pytest.raises(TypeError):
+        DocumentClassifier.load(str(wrong_type_path))
