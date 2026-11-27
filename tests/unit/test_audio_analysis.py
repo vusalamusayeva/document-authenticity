@@ -228,7 +228,7 @@ def test_extract_pcm_rms_returns_none_on_zero_samples(
             return 0
 
         def readframes(self, _n: int) -> bytes:
-            return b"\x00\x00"
+            return b""
 
     def _fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         out_wav = Path(cmd[-1])
