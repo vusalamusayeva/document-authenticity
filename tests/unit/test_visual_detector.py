@@ -170,3 +170,100 @@ def test_visual_detector_torch_branches(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(vd_mod.torch, "load", lambda *args, **kwargs: 12345)
     with pytest.raises(ModelUnavailableError):
         VisualDetector(checkpoint_path=pt_path).load_model()
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pytest
+
+from doc_auth.deepfake import visual_detector as vd_mod
+from doc_auth.deepfake.exceptions import ModelUnavailableError
+from doc_auth.deepfake.visual_detector import VisualDetector
+
+
+def _save_valid_npz(path: Path, input_size: tuple[int, int] = (224, 224)) -> None:
+    np.savez(
+        path,
+        weights=np.array([0.2, -0.1, 0.05, 0.3], dtype=np.float32),
+        bias=np.array([0.0], dtype=np.float32),
+        laplacian_scale=np.array([1.0], dtype=np.float32),
+        input_size=np.array(list(input_size), dtype=np.int32),
+        class_mapping=np.array(['{"0": "real", "1": "deepfake"}']),
+    )
+
+
+def test_visual_detector_sha256_mismatch_and_autoload(tmp_path: Path) -> None:
+    ckpt = tmp_path / "model.npz"
+    _save_valid_npz(ckpt)
+
+    bad_sha = VisualDetector(checkpoint_path=ckpt, expected_sha256="0" * 64)
+    with pytest.raises(ModelUnavailableError):
+        bad_sha.verify_model_weights()
+
+    det = VisualDetector(checkpoint_path=ckpt)
+    patch = np.full((32, 32, 3), 120, dtype=np.uint8)
+    score = det._compute_region_score(patch)
+    assert 0.0 <= score <= 1.0
+    # Second load hits cached loaded branch
+    cached = det.load_model()
+    assert cached["status"] == "loaded"
+    assert cached["backend"] == "numpy_linear_model"
+
+
+def test_visual_detector_torch_checkpoint_and_missing_weights_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if vd_mod.torch is None or vd_mod.nn is None:
+        pytest.skip("torch is not installed")
+
+    pt_path = tmp_path / "weights.pt"
+    pt_path.write_bytes(b"fake-pt-bytes")
+
+    class _DummyNet(vd_mod.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = vd_mod.nn.Linear(4, 1)
+
+    dummy_net = _DummyNet()
+    monkeypatch.setattr(vd_mod.torch, "load", lambda *args, **kwargs: dummy_net)
+
+    det = VisualDetector(checkpoint_path=pt_path)
+    info = det.load_model()
+    assert info["backend"] == "torch_checkpoint"
+    assert det.load_model()["status"] == "loaded"
+
+    # _compute_region_score raises ModelUnavailableError when torch model has no _weights_data
+    with pytest.raises(ModelUnavailableError):
+        det._compute_region_score(np.ones((16, 16, 3), dtype=np.uint8))
+
+    # state_dict with module. prefix
+    monkeypatch.setattr(
+        vd_mod.torch,
+        "load",
+        lambda *args, **kwargs: {"state_dict": {"module.weight": np.array([1.0])}},
+    )
+    det2 = VisualDetector(checkpoint_path=pt_path)
+    info2 = det2.load_model()
+    assert info2["backend"] == "torch_checkpoint"
+    assert isinstance(det2._model, dict) and "weight" in det2._model
+
+    # Empty state_dict raises ModelUnavailableError
+    monkeypatch.setattr(vd_mod.torch, "load", lambda *args, **kwargs: {"model_state_dict": {}})
+    det3 = VisualDetector(checkpoint_path=pt_path)
+    with pytest.raises(ModelUnavailableError):
+        det3.load_model()
+
+    # Unsupported object type raises ModelUnavailableError
+    monkeypatch.setattr(vd_mod.torch, "load", lambda *args, **kwargs: ["invalid"])
+    det4 = VisualDetector(checkpoint_path=pt_path)
+    with pytest.raises(ModelUnavailableError):
+        det4.load_model()
+
+    # torch.load failure raises ModelUnavailableError
+    def _boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("corrupt checkpoint")
+
+    monkeypatch.setattr(vd_mod.torch, "load", _boom)
+    det5 = VisualDetector(checkpoint_path=pt_path)
+    with pytest.raises(ModelUnavailableError):
+        det5.load_model()
