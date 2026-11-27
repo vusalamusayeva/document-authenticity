@@ -81,9 +81,9 @@ def test_router_unready_and_error_branches(monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert r_analyze_503.status_code == 503
 
-    router_unready = df_api.create_deepfake_router()
+    router_ready = df_api.create_deepfake_router(pipeline_runner=lambda p: {"ok": True})
     analyze_fn = None
-    for route in router_unready.routes:
+    for route in router_ready.routes:
         if getattr(route, "path", None) == "/deepfake/analyze":
             analyze_fn = route.endpoint
             break
