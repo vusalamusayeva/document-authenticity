@@ -45,6 +45,9 @@ def test_metadata_analyzer_signals_and_wrappers(monkeypatch: pytest.MonkeyPatch,
             self.st_mtime = 1_000_000_000.0
             self.st_ctime = 1_700_000_000.0
 
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._st, name)
+
     def _patched_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
         st = orig_stat(self, *args, **kwargs)
         if self == dated_file:
@@ -111,6 +114,7 @@ def test_metadata_analyzer_exif_dict_and_pdf_metadata(monkeypatch: pytest.Monkey
     assert "Make" not in img_res["metadata"]["exif"]
     assert img_res["suspicious"] is True
 
+    # PDF metadata via PyMuPDF
     pdf_path = tmp_path / "doc.pdf"
     doc = fitz.open()
     page = doc.new_page()
