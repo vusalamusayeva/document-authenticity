@@ -49,5 +49,5 @@ def analyze_texture(image: np.ndarray, bbox: tuple[int, int, int, int] | None = 
 
     except SignatureStampError:
         raise
-    except (ValueError, TypeError, ArithmeticError, cv2.error) as e:
+    except (ValueError, TypeError, ArithmeticError, RuntimeError, cv2.error) as e:
         raise SignatureStampError(f"Doku analizi zaman? x?ta: {e!s}") from e

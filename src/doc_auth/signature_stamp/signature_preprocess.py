@@ -49,5 +49,5 @@ def preprocess_signature(image: np.ndarray, bbox: tuple[int, int, int, int] | No
 
     except SignatureStampError:
         raise
-    except (ValueError, TypeError, ArithmeticError, cv2.error) as e:
+    except (ValueError, TypeError, ArithmeticError, RuntimeError, cv2.error) as e:
         raise SignatureStampError(f"?mza ?n i?l?nm?si zaman? x?ta: {e!s}") from e
