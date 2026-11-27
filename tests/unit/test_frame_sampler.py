@@ -94,8 +94,9 @@ def test_sample_video_frames_and_sampler_wrappers(monkeypatch: pytest.MonkeyPatc
     cap2 = _FakeCap(frames=[(True, f1), (True, f2)], pos_msec_seq=[1500.0, 2500.0], native_fps=30.0)
     monkeypatch.setattr(fs_mod, "VideoStreamReader", lambda path, cfg: _FakeReader(cap2, metadata={"fps": 30.0}))
     via_call = list(sampler(dummy_video))
-    assert len(via_call) == 1
+    assert len(via_call) == 2
     assert via_call[0]["timestamp"] == pytest.approx(1.5)
+    assert via_call[1]["timestamp"] == pytest.approx(2.5)
 
     # Unexpected exception inside reader is wrapped in VideoValidationError
     boom_cap = _FakeCap(frames=[], boom_on_read=True)
