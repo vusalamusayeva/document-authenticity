@@ -1,5 +1,4 @@
-﻿import os
-from pathlib import Path
+﻿from pathlib import Path
 from typing import Any
 
 import fitz  # type: ignore
@@ -21,8 +20,7 @@ def test_metadata_analyzer_invalid_chunk_size_and_missing_file(tmp_path: Path) -
     assert missing_res["suspicious"] is None
 
 
-def test_metadata_analyzer_signals_and_wrappers(tmp_path: Path) -> None:
-    # Zero-byte file and missing extension
+def test_metadata_analyzer_signals_and_wrappers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     zero_no_ext = tmp_path / "raw_empty"
     zero_no_ext.write_bytes(b"")
 
@@ -33,16 +31,30 @@ def test_metadata_analyzer_signals_and_wrappers(tmp_path: Path) -> None:
     assert res["extension"] == ""
     assert res["suspicious"] is True
     assert res["metadata_present"] is False
-    assert any("0 bayt" in r for r in res["reasons"])
-    assert any("genişlənməsi" in r or "extension" in r.lower() for r in res["reasons"])
+    assert any(sig["field"] == "size_bytes" for sig in res["suspicious_signals"])
+    assert any(sig["field"] == "extension" for sig in res["suspicious_signals"])
 
-    # Modified timestamp earlier than created timestamp
     dated_file = tmp_path / "dated.bin"
     dated_file.write_bytes(b"hello")
-    os.utime(dated_file, (1_000_000_000, 1_000_000_000))
+    orig_stat = Path.stat
+
+    class _StatProxy:
+        def __init__(self, st: Any) -> None:
+            self._st = st
+            self.st_size = st.st_size
+            self.st_mtime = 1_000_000_000.0
+            self.st_ctime = 1_700_000_000.0
+
+    def _patched_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        st = orig_stat(self, *args, **kwargs)
+        if self == dated_file:
+            return _StatProxy(st)
+        return st
+
+    monkeypatch.setattr(Path, "stat", _patched_stat)
     dated_res = analyzer.analyze(dated_file)
     assert dated_res["suspicious"] is True
-    assert any("Modifikasiya vaxtı" in r for r in dated_res["reasons"])
+    assert any(sig["field"] == "modified_at_utc" for sig in dated_res["suspicious_signals"])
 
 
 def test_metadata_analyzer_image_info_and_exif_editor_marker(tmp_path: Path) -> None:
@@ -99,7 +111,6 @@ def test_metadata_analyzer_exif_dict_and_pdf_metadata(monkeypatch: pytest.Monkey
     assert "Make" not in img_res["metadata"]["exif"]
     assert img_res["suspicious"] is True
 
-    # PDF metadata via PyMuPDF
     pdf_path = tmp_path / "doc.pdf"
     doc = fitz.open()
     page = doc.new_page()
