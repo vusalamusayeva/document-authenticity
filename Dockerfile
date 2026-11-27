@@ -11,13 +11,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY pyproject.toml requirements.lock ./
 COPY src/ ./src/
 COPY api/ ./api/
 COPY configs/ ./configs/
 COPY models/ ./models/
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -r requirements.lock \
+    && pip install --no-cache-dir --no-deps . \
+    && python -c "import cv2, numpy as np; assert cv2.__version__ == '4.10.0.84', cv2.__version__; from doc_auth.deepfake.face_detector import _load_face_cascade, detect_faces; c = _load_face_cascade(); assert not c.empty(); out = detect_faces(np.zeros((160, 160, 3), dtype=np.uint8)); assert isinstance(out, list); print('DOCKER_OPENCV_HAAR_OK', cv2.__version__)"
 
 EXPOSE 8000
 
