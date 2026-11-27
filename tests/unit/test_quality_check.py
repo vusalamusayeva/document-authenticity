@@ -1,8 +1,9 @@
-﻿import cv2
+import cv2
 import numpy as np
 import pytest
 
 from doc_auth.preprocessing import quality_check as qc
+from doc_auth.preprocessing.quality_check import _QualityDict, preprocess_image, run_quality_check
 
 
 def test_validate_and_preprocess_image_branches() -> None:
@@ -16,7 +17,6 @@ def test_validate_and_preprocess_image_branches() -> None:
     with pytest.raises(ValueError):
         qc.preprocess_image(np.array([], dtype=np.uint8))
 
-    # Color path with grayscale=False, denoise, contrast, deskew, and binarization
     skewed = np.full((64, 96, 3), 255, dtype=np.uint8)
     cv2.line(skewed, (10, 12), (85, 36), (0, 0, 0), 3)
     res_color = qc.preprocess_image(
@@ -33,7 +33,6 @@ def test_validate_and_preprocess_image_branches() -> None:
     assert res_color.ndim == 2
     assert res_color.shape == (64, 96)
 
-    # Grayscale input path with denoise & contrast disabled
     gray_in = np.full((24, 24), 140, dtype=np.uint8)
     res_gray = qc.preprocess_image(
         gray_in,
@@ -59,7 +58,6 @@ def test_quality_dict_blur_brightness_and_run_quality_check() -> None:
     with pytest.raises(ValueError):
         qc.run_quality_check(np.array([], dtype=np.uint8))
 
-    # Dark image and bright image checks with min_b/max_b
     dark_img = np.full((20, 20), 10, dtype=np.uint8)
     dark_res = qc.check_brightness(dark_img, min_b=30.0, max_b=200.0)
     assert dark_res["is_dark"] is True
@@ -70,7 +68,6 @@ def test_quality_dict_blur_brightness_and_run_quality_check() -> None:
     assert bright_res["is_bright"] is True
     assert bright_res["passed"] is False
 
-    # Sharp checkerboard image passes blur & brightness checks
     sharp = np.zeros((64, 64, 3), dtype=np.uint8)
     for r in range(0, 64, 4):
         for c in range(0, 64, 4):
@@ -80,6 +77,8 @@ def test_quality_dict_blur_brightness_and_run_quality_check() -> None:
     blur_res = qc.check_blur(sharp, threshold=10.0)
     assert blur_res["passed"] is True
     assert blur_res["is_blurry"] is False
+    b_score, b_ok = blur_res
+    assert b_ok is True and b_score >= 10.0
 
     full_res = qc.run_quality_check(
         sharp,
@@ -88,11 +87,6 @@ def test_quality_dict_blur_brightness_and_run_quality_check() -> None:
     assert full_res["status"] == "passed"
     assert full_res["passed"] is True
     assert full_res["processed_shape"] == [64, 64]
-import numpy as np
-import pytest
-
-from doc_auth.preprocessing import quality_check as qc
-from doc_auth.preprocessing.quality_check import _QualityDict, preprocess_image, run_quality_check
 
 
 def test_quality_check_deskew_negative_45_and_quality_dict_iter(
@@ -121,7 +115,6 @@ def test_quality_check_deskew_negative_45_and_quality_dict_iter(
         config={"denoise": False, "contrast": False, "deskew": False, "binarization": False},
     )
     assert "status" in list(q_res)
-from doc_auth.preprocessing.quality_check import _QualityDict
 
 
 def test_quality_dict_getattr_is_acceptable_fallback() -> None:

@@ -1,4 +1,4 @@
-﻿import builtins
+import builtins
 from pathlib import Path
 import sys
 import types
@@ -26,6 +26,10 @@ def test_ocr_checker_resolve_image_and_not_applicable(tmp_path: Path) -> None:
 
     assert checker._resolve_image(np.array([], dtype=np.uint8)) is None
 
+    direct_arr = np.full((16, 16, 3), 200, dtype=np.uint8)
+    assert checker._resolve_image(direct_arr) is direct_arr
+    assert checker._resolve_image({"frame": direct_arr}) is direct_arr
+
     img_path = tmp_path / "sample.png"
     img = np.full((32, 32, 3), 255, dtype=np.uint8)
     cv2.putText(img, "ABC", (2, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
@@ -46,7 +50,6 @@ def test_ocr_checker_tesseract_missing_and_easyocr_fallback(
     gray = np.full((40, 120), 255, dtype=np.uint8)
     cv2.putText(gray, "TEST", (5, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 
-    # 1. Missing tesseract binary -> RuntimeError in _run_tesseract, fallback to easyocr
     fake_pytesseract = types.SimpleNamespace(
         pytesseract=types.SimpleNamespace(tesseract_cmd="nonexistent_tesseract_bin"),
         Output=types.SimpleNamespace(DICT="dict"),
@@ -73,7 +76,6 @@ def test_ocr_checker_tesseract_missing_and_easyocr_fallback(
     assert checker.analyze(gray) == res
     assert checker(gray) == res
 
-    # 2. Both engines fail -> ocr_unavailable
     def _fail_import(name, *args, **kwargs):
         if name in {"pytesseract", "easyocr"}:
             raise ImportError(f"no {name}")
@@ -114,12 +116,6 @@ def test_ocr_checker_tesseract_invalid_conf_and_low_confidence(
     assert res["text"] == "LOW BADCONF"
     assert res["has_text"] is True
     assert res["suspicious"] is True
-import sys
-import types
-import numpy as np
-import pytest
-
-from doc_auth.ocr.ocr_check import OCRChecker
 
 
 def test_run_easyocr_skips_empty_text_token(monkeypatch: pytest.MonkeyPatch) -> None:
