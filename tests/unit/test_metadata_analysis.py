@@ -128,3 +128,43 @@ def test_metadata_analyzer_exif_dict_and_pdf_metadata(monkeypatch: pytest.Monkey
     assert pdf_res["metadata"]["pdf_page_count"] == 1
     assert pdf_res["metadata"]["pdf_creator"] == "LibreOffice Writer"
     assert pdf_res["suspicious"] is True
+import builtins
+import sys
+import types
+from pathlib import Path
+import pytest
+
+from doc_auth.metadata.metadata_analysis import MetadataAnalyzer
+
+
+def test_metadata_resolve_path_from_dict_and_parse_error_signals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    img_file = tmp_path / "sample.png"
+    img_file.write_bytes(b"not-a-valid-png")
+
+    analyzer = MetadataAnalyzer()
+    resolved = analyzer._resolve_path({"file_path": str(img_file)})
+    assert resolved == img_file
+
+    # Force image metadata parse error -> triggers lines 85-86 and 147-149
+    res_img = analyzer.analyze({"document_path": str(img_file)})
+    assert res_img["status"] == "success"
+    assert res_img["suspicious"] is True
+    assert any(sig.get("field") == "embedded_metadata" for sig in res_img["suspicious_signals"])
+
+    # Force PDF metadata parse error via fake fitz module -> triggers lines 99-100 and 147-149
+    pdf_file = tmp_path / "sample.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4\n%%EOF")
+
+    class _BrokenFitzDoc:
+        def __len__(self) -> int:
+            raise RuntimeError("corrupt pdf structure")
+
+    fake_fitz = types.SimpleNamespace(open=lambda _p: _BrokenFitzDoc())
+    monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
+
+    res_pdf = analyzer.analyze({"path": str(pdf_file)})
+    assert res_pdf["status"] == "success"
+    assert res_pdf["suspicious"] is True
+    assert any("PDF metadata-s" in r for r in res_pdf["reasons"])
