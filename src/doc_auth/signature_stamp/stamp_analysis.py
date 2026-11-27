@@ -56,4 +56,4 @@ def analyze_stamp(stamp_image: np.ndarray) -> StampResult:
     except StampAnalysisError:
         raise
     except (ValueError, TypeError, ArithmeticError, RuntimeError, cv2.error) as e:
-        raise StampAnalysisError(f\"M?h?r analizi x?tas?: {e!s}\") from e
+        raise StampAnalysisError(f"M?h?r analizi x?tas?: {e!s}") from e
