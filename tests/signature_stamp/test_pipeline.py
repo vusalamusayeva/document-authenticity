@@ -54,3 +54,20 @@ def test_pipeline_risk_threshold():
     img = np.ones((300, 300, 3), dtype=np.uint8) * 255
     res = analyze_signature_stamp(img, file_id="doc_thresh")
     assert 0.0 <= res.risk_score <= 1.0
+
+def test_pipeline_inner_unexpected_error_returns_failed(monkeypatch):
+    import doc_auth.signature_stamp.pipeline as pipe_mod
+
+    img = np.ones((120, 120, 3), dtype=np.uint8) * 255
+
+    class _BoomDetector:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def detect_stamps_and_signatures(self, _img):
+            raise RuntimeError("boom inside detector")
+
+    monkeypatch.setattr(pipe_mod, "SignatureStampDetector", _BoomDetector)
+    res = analyze_signature_stamp(img, file_id="doc_inner_err")
+    assert res.status == "failed"
+    assert any("boom inside detector" in e for e in res.errors)

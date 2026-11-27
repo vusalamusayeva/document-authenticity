@@ -7,11 +7,11 @@ from doc_auth.deepfake.exceptions import ModelUnavailableError
 from doc_auth.deepfake.visual_detector import VisualDetector
 
 
-
 def test_visual_detector_loads_torch_checkpoint_and_infers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import types
+
     import doc_auth.deepfake.visual_detector as vd_mod
 
     fake_nn = types.SimpleNamespace(Module=type("_FakeModule", (), {}))
@@ -54,6 +54,7 @@ def test_visual_detector_torch_module_and_state_dict_branches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import types
+
     import doc_auth.deepfake.visual_detector as vd_mod
 
     class _FakeModule:
@@ -165,3 +166,15 @@ def test_visual_detector_load_model_unsupported_suffix(tmp_path: Path) -> None:
     detector = VisualDetector(checkpoint_path=ckpt)
     with pytest.raises(ModelUnavailableError):
         detector.load_model()
+
+def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch, tmp_path):
+    import pytest
+    from doc_auth.deepfake import visual_detector as vd_mod
+    from doc_auth.deepfake.exceptions import ModelUnavailableError
+
+    assert vd_mod.nn is not None
+    missing_ckpt = tmp_path / "nonexistent_weights.pt"
+    det = vd_mod.VisualDeepfakeDetector(checkpoint_path=str(missing_ckpt))
+    monkeypatch.setattr(vd_mod, "torch", None)
+    with pytest.raises(ModelUnavailableError):
+        det.load()

@@ -1,6 +1,8 @@
-import numpy as np
 import cv2
+import numpy as np
+
 from doc_auth.signature_stamp.signature_similarity import SignatureSimilarity
+
 
 def test_compare_identical_signatures():
     img1 = np.ones((100, 100, 3), dtype=np.uint8) * 255
@@ -17,3 +19,13 @@ def test_compare_different_signatures():
     
     result = SignatureSimilarity.compare(img1, img2)
     assert result["total_similarity"] < 0.5
+
+def test_orb_similarity_when_orb_unavailable(monkeypatch):
+    import cv2
+    from doc_auth.signature_stamp.signature_similarity import SignatureSimilarity
+
+    img1 = np.ones((120, 120, 3), dtype=np.uint8) * 255
+    img2 = np.ones((120, 120, 3), dtype=np.uint8) * 255
+    monkeypatch.setattr(cv2, "ORB_create", None, raising=False)
+    score = SignatureSimilarity.calculate_orb_similarity(img1, img2)
+    assert score == 0.0
