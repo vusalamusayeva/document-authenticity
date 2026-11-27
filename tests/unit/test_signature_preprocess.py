@@ -21,9 +21,8 @@ def test_preprocess_signature_branches_and_errors(monkeypatch: pytest.MonkeyPatc
     assert res_valid.shape == (150, 300)
     assert res_valid.dtype == np.uint8
 
-    # Zero-size ROI branch when findNonZero returns None
-    monkeypatch.setattr(cv2, "findNonZero", lambda *args, **kwargs: None)
-    monkeypatch.setattr(cv2, "boundingRect", lambda *args, **kwargs: (0, 0, 0, 0))
+    # Zero-dimension ROI branch when resized ROI has 0 height/width
+    monkeypatch.setattr(cv2, "resize", lambda *args, **kwargs: np.zeros((0, 0), dtype=np.uint8))
     res_zero_roi = preprocess_signature(img)
     assert res_zero_roi.shape == (150, 300)
     assert np.all(res_zero_roi == 255)
