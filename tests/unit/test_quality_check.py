@@ -121,3 +121,10 @@ def test_quality_check_deskew_negative_45_and_quality_dict_iter(
         config={"denoise": False, "contrast": False, "deskew": False, "binarization": False},
     )
     assert "status" in list(q_res)
+from doc_auth.preprocessing.quality_check import _QualityDict
+
+
+def test_quality_dict_getattr_is_acceptable_fallback() -> None:
+    q = _QualityDict({"passed": True})
+    del q["is_acceptable"]
+    assert q.is_acceptable is True
