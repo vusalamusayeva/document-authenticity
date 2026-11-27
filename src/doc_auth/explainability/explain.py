@@ -1,16 +1,21 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class Explainer:
-    """Q?rar, ??kil?r v? siqnallar ?sas?nda strukturla?d?r?lm?? izah v? faktor siyah?s? qaytar?r."""
+    """Q?rar, ??kill?r v? siqnallar ?sas?nda strukturla?d?r?lm?? izah v? faktor siyah?s? qaytar?r."""
 
-    def explain(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        data = payload or {}
-        decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
-        signals = data.get("signals") if isinstance(data.get("signals"), dict) else data
+    def explain(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        data: dict[str, Any] = payload if isinstance(payload, dict) else {}
 
-        contributions = decision.get("contributions") if isinstance(decision.get("contributions"), list) else []
-        factors: List[Dict[str, Any]] = []
+        raw_decision = data.get("decision")
+        decision: dict[str, Any] = raw_decision if isinstance(raw_decision, dict) else {}
+
+        raw_signals = data.get("signals")
+        signals: dict[str, Any] = raw_signals if isinstance(raw_signals, dict) else data
+
+        raw_contributions = decision.get("contributions")
+        contributions: list[Any] = raw_contributions if isinstance(raw_contributions, list) else []
+        factors: list[dict[str, Any]] = []
         for item in contributions:
             if isinstance(item, dict):
                 factors.append({
@@ -20,18 +25,30 @@ class Explainer:
                     "weighted_risk": item.get("weighted_risk"),
                 })
 
-        evidence_highlights: List[str] = []
-        forensics = signals.get("forensics") if isinstance(signals.get("forensics"), dict) else {}
-        metadata = signals.get("metadata") if isinstance(signals.get("metadata"), dict) else {}
-        ocr = signals.get("ocr") if isinstance(signals.get("ocr"), dict) else {}
-        classification = signals.get("classification") if isinstance(signals.get("classification"), dict) else {}
+        evidence_highlights: list[str] = []
+
+        raw_forensics = signals.get("forensics")
+        forensics: dict[str, Any] = raw_forensics if isinstance(raw_forensics, dict) else {}
+
+        raw_metadata = signals.get("metadata")
+        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+
+        raw_ocr = signals.get("ocr")
+        ocr: dict[str, Any] = raw_ocr if isinstance(raw_ocr, dict) else {}
+
+        raw_classification = signals.get("classification")
+        classification: dict[str, Any] = (
+            raw_classification if isinstance(raw_classification, dict) else {}
+        )
 
         if forensics.get("tampering_score") is not None:
             evidence_highlights.append(
                 f"Forensics ELA skoru: {forensics.get('tampering_score')} (tampered={forensics.get('tampered')})"
             )
 
-        for sig in metadata.get("suspicious_signals") or []:
+        raw_suspicious = metadata.get("suspicious_signals")
+        suspicious_signals: list[Any] = raw_suspicious if isinstance(raw_suspicious, list) else []
+        for sig in suspicious_signals:
             if isinstance(sig, dict) and sig.get("reason"):
                 evidence_highlights.append(f"Metadata [{sig.get('field')}]: {sig.get('reason')}")
 
@@ -58,13 +75,13 @@ class Explainer:
             "decision": decision_label,
             "risk_score": risk_score,
             "summary": summary,
-            "signals_count": len(signals) if isinstance(signals, dict) else 0,
+            "signals_count": len(signals),
             "factors": factors,
             "evidence_highlights": evidence_highlights,
         }
 
-    def analyze(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def analyze(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.explain(payload)
 
-    def __call__(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __call__(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.explain(payload)
