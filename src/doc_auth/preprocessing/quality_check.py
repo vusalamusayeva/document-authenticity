@@ -1,16 +1,16 @@
+from typing import Any
+
 import cv2
 import numpy as np
-from typing import Dict, Any, Optional
+
 
 def validate_image(image: np.ndarray) -> bool:
     """
     Şəkil massivinin etibarlı olub-olmadığını yoxlayır.
     """
-    if image is None or not isinstance(image, np.ndarray) or image.size == 0:
-        return False
-    return True
+    return not (image is None or not isinstance(image, np.ndarray) or image.size == 0)
 
-def preprocess_image(image: np.ndarray, config: Optional[Dict[str, Any]] = None) -> np.ndarray:
+def preprocess_image(image: np.ndarray, config: dict[str, Any] | None = None) -> np.ndarray:
     """
     Sənəd şəkilləri üçün ilkin emal və keyfiyyət yoxlaması həyata keçirir.
     Orijinal şəkli dəyişməmək üçün surəti (.copy()) üzərində işləyir.
@@ -85,7 +85,7 @@ def preprocess_image(image: np.ndarray, config: Optional[Dict[str, Any]] = None)
 
 
 class _QualityDict(dict):
-    def __init__(self, data: Dict[str, Any], unpack_pair: tuple[Any, Any] | None = None):
+    def __init__(self, data: dict[str, Any], unpack_pair: tuple[Any, Any] | None = None):
         super().__init__(data)
         self._unpack_pair = unpack_pair
 
@@ -133,8 +133,8 @@ def check_brightness(
     image: np.ndarray,
     min_brightness: float = 40.0,
     max_brightness: float = 220.0,
-    min_b: Optional[float] = None,
-    max_b: Optional[float] = None,
+    min_b: float | None = None,
+    max_b: float | None = None,
 ) -> _QualityDict:
     if not validate_image(image):
         raise ValueError("Etibars?z v? ya bo? ??kil daxil edildi.")
@@ -163,7 +163,7 @@ def check_brightness(
 
 def run_quality_check(
     image: np.ndarray,
-    config: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
 ) -> _QualityDict:
     if not validate_image(image):
         raise ValueError("Etibars?z v? ya bo? ??kil daxil edildi.")

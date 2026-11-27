@@ -4,7 +4,7 @@ Document Type Classification (pipeline add?m 3)
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar
 
 import cv2
 import numpy as np
@@ -18,7 +18,7 @@ from doc_auth.utils.base_model import BaseDocModel
 class DocumentClassifier(BaseDocModel):
     """Real ML t?snifat??s? v? etibarl?l?q (confidence) kalibrasiyas? olan s?n?d t?snifat??s?."""
 
-    DEFAULT_CLASSES = [
+    DEFAULT_CLASSES: ClassVar[list[str]] = [
         "id_card",
         "passport",
         "drivers_license",
@@ -30,7 +30,7 @@ class DocumentClassifier(BaseDocModel):
         self.params = params or {}
         classes = self.params.get("classes")
         if isinstance(classes, (list, tuple)) and len(classes) > 0:
-            self.classes: List[str] = [str(c) for c in classes]
+            self.classes: list[str] = [str(c) for c in classes]
         else:
             self.classes = list(self.DEFAULT_CLASSES)
         if "unknown" not in self.classes:
@@ -38,11 +38,11 @@ class DocumentClassifier(BaseDocModel):
 
         conf_val = self.params.get("min_confidence", 0.45)
         self.min_confidence: float = float(conf_val)
-        self._scaler: Optional[StandardScaler] = None
-        self._clf: Optional[LogisticRegression] = None
+        self._scaler: StandardScaler | None = None
+        self._clf: LogisticRegression | None = None
         self._is_fitted = False
 
-    def _resolve_image(self, item: Any) -> Optional[np.ndarray]:
+    def _resolve_image(self, item: Any) -> np.ndarray | None:
         if isinstance(item, np.ndarray):
             return item if item.size > 0 else None
         if isinstance(item, dict):
@@ -160,11 +160,7 @@ class DocumentClassifier(BaseDocModel):
 
         if X is None:
             raise ValueError("predict_proba() ???n X bo? ola bilm?z.")
-        if isinstance(X, np.ndarray) and X.ndim == 3:
-            rows = [X]
-        elif isinstance(X, dict):
-            rows = [X]
-        elif isinstance(X, (str, Path)):
+        if (isinstance(X, np.ndarray) and X.ndim == 3) or isinstance(X, (dict, str, Path)):
             rows = [X]
         else:
             rows = list(X)
@@ -176,11 +172,11 @@ class DocumentClassifier(BaseDocModel):
         scaled_x = self._scaler.transform(feats)
         return np.asarray(self._clf.predict_proba(scaled_x), dtype=np.float64)
 
-    def predict(self, X) -> List[str]:
+    def predict(self, X) -> list[str]:
         probs = self.predict_proba(X)
         if probs.shape[0] == 0:
             return []
-        predictions: List[str] = []
+        predictions: list[str] = []
         for row_probs in probs:
             best_idx = int(np.argmax(row_probs))
             best_conf = float(row_probs[best_idx])
@@ -190,7 +186,7 @@ class DocumentClassifier(BaseDocModel):
                 predictions.append(self.classes[best_idx])
         return predictions
 
-    def evaluate(self, X_test, y_test) -> Dict[str, Any]:
+    def evaluate(self, X_test, y_test) -> dict[str, Any]:
         self._ensure_fitted()
         y_true = [str(v) for v in y_test]
         y_pred = self.predict(X_test)
@@ -216,7 +212,7 @@ class DocumentClassifier(BaseDocModel):
             "per_class": per_class,
         }
 
-    def classify(self, payload: Any) -> Dict[str, Any]:
+    def classify(self, payload: Any) -> dict[str, Any]:
         image = self._resolve_image(payload)
         if image is None and not (isinstance(payload, dict) and "features" in payload):
             return {

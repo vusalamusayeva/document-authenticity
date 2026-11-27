@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -9,7 +9,7 @@ class BoundingBox(BaseModel):
     x2: float = 0.0
     y2: float = 0.0
     confidence: float = 0.0
-    label: Optional[str] = None
+    label: str | None = None
 
     @property
     def width(self) -> float:
@@ -19,79 +19,79 @@ class BoundingBox(BaseModel):
     def height(self) -> float:
         return max(0.0, self.y2 - self.y1)
 
-    def as_list(self) -> List[float]:
+    def as_list(self) -> list[float]:
         return [self.x1, self.y1, self.x2, self.y2]
 
-    def as_int_list(self) -> List[int]:
-        return [int(round(self.x1)), int(round(self.y1)), int(round(self.x2)), int(round(self.y2))]
+    def as_int_list(self) -> list[int]:
+        return [round(self.x1), round(self.y1), round(self.x2), round(self.y2)]
 
 
 class Candidate(BaseModel):
-    candidate_id: Optional[str] = None
+    candidate_id: str | None = None
     element_type: str = "unknown"
-    label: Optional[str] = None
+    label: str | None = None
     bbox: Any = None
     score: float = 0.0
     confidence: float = 0.0
-    is_authentic: Optional[bool] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    is_authentic: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class StampResult(BaseModel):
     status: str = "success"
     detected: bool = False
-    is_authentic: Optional[bool] = None
+    is_authentic: bool | None = None
     confidence: float = 0.0
-    score: Optional[float] = None
-    circularity: Optional[float] = None
-    solidity: Optional[float] = None
-    bbox: Optional[BoundingBox] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
+    score: float | None = None
+    circularity: float | None = None
+    solidity: float | None = None
+    bbox: BoundingBox | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class SignatureResult(BaseModel):
     status: str = "success"
     detected: bool = False
-    similarity_score: Optional[float] = None
-    is_match: Optional[bool] = None
+    similarity_score: float | None = None
+    is_match: bool | None = None
     confidence: float = 0.0
-    bbox: Optional[BoundingBox] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
+    bbox: BoundingBox | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class TextureAnalysisResult(BaseModel):
     status: str = "success"
     texture_score: float = 0.0
     anomalies_detected: bool = False
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class SecurityElementsResult(BaseModel):
     status: str = "success"
-    elements_found: List[str] = Field(default_factory=list)
-    score: Optional[float] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
+    elements_found: list[str] = Field(default_factory=list)
+    score: float | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class SignatureStampItem(BaseModel):
     element_type: str
-    bbox: List[float] = Field(default_factory=list)
+    bbox: list[float] = Field(default_factory=list)
     confidence: float = 0.0
-    is_authentic: Optional[bool] = None
-    extra: Dict[str, Any] = Field(default_factory=dict)
+    is_authentic: bool | None = None
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class SignatureStampResult(BaseModel):
     file_id: str
     status: str = "success"
-    overall_score: Optional[float] = None
-    risk_score: Optional[float] = None
-    is_suspicious: Optional[bool] = None
-    is_tampered: Optional[bool] = None
-    visualization_path: Optional[str] = None
-    signature_verifications: List[Dict[str, Any]] = Field(default_factory=list)
-    items: List[SignatureStampItem] = Field(default_factory=list)
-    errors: List[str] = Field(default_factory=list)
+    overall_score: float | None = None
+    risk_score: float | None = None
+    is_suspicious: bool | None = None
+    is_tampered: bool | None = None
+    visualization_path: str | None = None
+    signature_verifications: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[SignatureStampItem] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
     @field_validator("file_id", mode="before")
     @classmethod

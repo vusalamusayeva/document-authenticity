@@ -1,13 +1,18 @@
 import asyncio
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, FastAPI, File, HTTPException, UploadFile
 
-from doc_auth.deepfake.exceptions import InvalidConfigError, ModelUnavailableError, VideoValidationError
-from doc_auth.deepfake.pipeline import DeepfakePipeline, analyze_video_deepfake
+from doc_auth.deepfake.exceptions import (
+    InvalidConfigError,
+    ModelUnavailableError,
+    VideoValidationError,
+)
+from doc_auth.deepfake.pipeline import DeepfakePipeline
 from doc_auth.deepfake.visual_detector import VisualDetector
 
 DEFAULT_DEEPFAKE_MODEL_PATH = "models/deepfake_detector.npz"
@@ -36,10 +41,10 @@ async def _read_upload_with_limit(
 
 
 def _resolve_model_config(
-    model_path: Optional[str | Path] = None,
-    expected_sha256: Optional[str] = None,
-    threshold: Optional[float] = None,
-) -> tuple[str, Optional[str], float]:
+    model_path: str | Path | None = None,
+    expected_sha256: str | None = None,
+    threshold: float | None = None,
+) -> tuple[str, str | None, float]:
     resolved_path = (
         str(model_path)
         if model_path is not None
@@ -62,10 +67,10 @@ def _resolve_model_config(
 
 
 def build_deepfake_pipeline_from_config(
-    model_path: Optional[str | Path] = None,
-    expected_sha256: Optional[str] = None,
-    threshold: Optional[float] = None,
-) -> tuple[DeepfakePipeline, Dict[str, Any]]:
+    model_path: str | Path | None = None,
+    expected_sha256: str | None = None,
+    threshold: float | None = None,
+) -> tuple[DeepfakePipeline, dict[str, Any]]:
     resolved_path, resolved_sha, resolved_threshold = _resolve_model_config(
         model_path=model_path,
         expected_sha256=expected_sha256,
@@ -84,16 +89,16 @@ def build_deepfake_pipeline_from_config(
 
 
 def create_deepfake_router(
-    pipeline_runner: Optional[Callable[[str | Path], Dict[str, Any]]] = None,
+    pipeline_runner: Callable[[str | Path], dict[str, Any]] | None = None,
     max_upload_bytes: int = 100 * 1024 * 1024,
     prefix: str = "/deepfake",
-    model_path: Optional[str | Path] = None,
-    expected_sha256: Optional[str] = None,
-    threshold: Optional[float] = None,
+    model_path: str | Path | None = None,
+    expected_sha256: str | None = None,
+    threshold: float | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["deepfake"])
 
-    state: Dict[str, Any] = {
+    state: dict[str, Any] = {
         "ready": False,
         "error": None,
         "model_info": None,
@@ -120,7 +125,7 @@ def create_deepfake_router(
             state["error"] = str(exc)
             state["model_info"] = None
 
-        def _default_runner(path: str | Path) -> Dict[str, Any]:
+        def _default_runner(path: str | Path) -> dict[str, Any]:
             active_pipeline = state.get("pipeline")
             if active_pipeline is None or not state.get("ready"):
                 raise ModelUnavailableError(
@@ -133,7 +138,7 @@ def create_deepfake_router(
     router.state = state  # type: ignore[attr-defined]
 
     @router.get("/readiness")
-    async def deepfake_readiness() -> Dict[str, Any]:
+    async def deepfake_readiness() -> dict[str, Any]:
         if not state.get("ready"):
             raise HTTPException(
                 status_code=503,
@@ -151,8 +156,8 @@ def create_deepfake_router(
 
     @router.post("/analyze")
     async def analyze_deepfake_endpoint(
-        file: UploadFile = File(...),
-    ) -> Dict[str, Any]:
+        file: Annotated[UploadFile, File(...)],
+    ) -> dict[str, Any]:
         if not state.get("ready") and pipeline_runner is None:
             raise HTTPException(
                 status_code=503,
@@ -166,7 +171,7 @@ def create_deepfake_router(
             raise HTTPException(status_code=400, detail="Bo? fayl g?nd?rilib.")
 
         suffix = Path(file.filename).suffix or ".mp4"
-        tmp_path: Optional[Path] = None
+        tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(content)
@@ -201,12 +206,12 @@ def create_deepfake_router(
 
 def attach_deepfake_router(
     app: FastAPI,
-    pipeline_runner: Optional[Callable[[str | Path], Dict[str, Any]]] = None,
+    pipeline_runner: Callable[[str | Path], dict[str, Any]] | None = None,
     max_upload_bytes: int = 100 * 1024 * 1024,
     prefix: str = "/deepfake",
-    model_path: Optional[str | Path] = None,
-    expected_sha256: Optional[str] = None,
-    threshold: Optional[float] = None,
+    model_path: str | Path | None = None,
+    expected_sha256: str | None = None,
+    threshold: float | None = None,
 ) -> APIRouter:
     router = create_deepfake_router(
         pipeline_runner=pipeline_runner,

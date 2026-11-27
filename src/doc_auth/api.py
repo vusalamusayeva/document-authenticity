@@ -1,6 +1,6 @@
-from pathlib import Path
-from typing import Any, Dict, Optional
 import uuid
+from pathlib import Path
+from typing import Annotated, Any
 
 from fastapi import APIRouter, FastAPI, File, HTTPException, UploadFile
 
@@ -14,9 +14,9 @@ CHUNK_SIZE = 65536
 
 import shutil
 import subprocess as _sp
-from typing import Tuple
 
-def check_readiness_state(service_obj: Any, required_langs: Tuple[str, ...] = ("eng", "aze")) -> Tuple[bool, Dict[str, Any]]:
+
+def check_readiness_state(service_obj: Any, required_langs: tuple[str, ...] = ("eng", "aze")) -> tuple[bool, dict[str, Any]]:
     model_ok = service_obj is not None
     if model_ok and hasattr(service_obj, "is_ready") and callable(service_obj.is_ready):
         try:
@@ -48,7 +48,7 @@ def check_readiness_state(service_obj: Any, required_langs: Tuple[str, ...] = ("
     missing_langs = [lg for lg in required_langs if lg not in installed_langs]
     ocr_ok = ocr_engine is not None and len(missing_langs) == 0
     ready_ok = model_ok and ocr_ok
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "status": "ready" if ready_ok else "not_ready",
         "model_ready": model_ok,
         "ocr_ready": ocr_ok,
@@ -77,13 +77,13 @@ def _validate_magic_bytes(ext: str, head: bytes) -> bool:
 
 
 def create_document_router(
-    analysis_service: Optional[Any] = None,
+    analysis_service: Any | None = None,
     max_upload_bytes: int = MAX_UPLOAD_BYTES,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["documents"])
     service = analysis_service if analysis_service is not None else AnalysisService()
-    job_store: Dict[str, Dict[str, Any]] = {}
-    idempotency_index: Dict[str, str] = {}
+    job_store: dict[str, dict[str, Any]] = {}
+    idempotency_index: dict[str, str] = {}
 
     async def _save_validated_upload(file: UploadFile, prefix: str) -> tuple[Path, int]:
         if not file.filename:
@@ -148,8 +148,10 @@ def create_document_router(
         },
     )
     @router.post("/analyze-file", response_model=DocumentAuthSummary, include_in_schema=False)
-    async def analyze_document_file_endpoint(file: UploadFile = File(...)) -> DocumentAuthSummary:
-        temp_path: Optional[Path] = None
+    async def analyze_document_file_endpoint(
+        file: Annotated[UploadFile, File(...)],
+    ) -> DocumentAuthSummary:
+        temp_path: Path | None = None
         try:
             temp_path, _ = await _save_validated_upload(file, "upload")
             summary = service.analyze_summary(temp_path)
@@ -174,7 +176,7 @@ def create_document_router(
 
     @router.post(
         "/analyze/json",
-        response_model=Dict[str, Any],
+        response_model=dict[str, Any],
         summary="Analyze document via JSON payload (file_path)",
         responses={
             200: {"description": "Document authentication summary dictionary"},
@@ -208,7 +210,7 @@ def create_document_router(
             }
         },
     )
-    async def analyze_document_json_endpoint(payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_document_json_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
         file_ref = payload.get("file_path") or payload.get("path")
         if not file_ref or not isinstance(file_ref, str):
             raise HTTPException(status_code=422, detail="JSON sor?usunda 'file_path' sah?si t?l?b olunur.")
@@ -226,9 +228,9 @@ def create_document_router(
 
     @router.post("/jobs")
     async def create_analysis_job(
-        file: UploadFile = File(...),
-        idempotency_key: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        file: Annotated[UploadFile, File(...)],
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         if idempotency_key and idempotency_key in idempotency_index:
             existing_id = idempotency_index[idempotency_key]
             existing = job_store.get(existing_id, {})
@@ -239,7 +241,7 @@ def create_document_router(
                 "result": existing.get("result"),
             }
 
-        temp_path: Optional[Path] = None
+        temp_path: Path | None = None
         try:
             temp_path, _ = await _save_validated_upload(file, "job")
             summary = service.analyze_summary(temp_path)
@@ -262,7 +264,7 @@ def create_document_router(
                     pass
 
     @router.get("/jobs/{job_id}")
-    async def get_analysis_job(job_id: str) -> Dict[str, Any]:
+    async def get_analysis_job(job_id: str) -> dict[str, Any]:
         stored = job_store.get(job_id)
         if stored is None:
             raise HTTPException(status_code=404, detail="Tap??r?q tap?lmad?.")
@@ -272,17 +274,17 @@ def create_document_router(
 
 
 def create_app(
-    analysis_service: Optional[Any] = None,
-    deepfake_runner: Optional[Any] = None,
+    analysis_service: Any | None = None,
+    deepfake_runner: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Document & Deepfake Authentication API", version="1.0.0")
 
     @app.get("/health")
-    async def health_check() -> Dict[str, str]:
+    async def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/ready")
-    async def readiness_check() -> Dict[str, Any]:
+    async def readiness_check() -> dict[str, Any]:
         svc = analysis_service if analysis_service is not None else AnalysisService()
         ok, payload = check_readiness_state(svc)
         if not ok:

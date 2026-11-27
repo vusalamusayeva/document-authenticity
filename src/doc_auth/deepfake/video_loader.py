@@ -2,7 +2,8 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from types import TracebackType
+from typing import Any, Self
 
 import cv2
 import numpy as np
@@ -13,14 +14,14 @@ from doc_auth.deepfake.exceptions import InvalidConfigError, VideoLoadError, Vid
 @dataclass
 class VideoLoaderConfig:
     probe_timeout_sec: float = 10.0
-    max_width: Optional[int] = None
-    max_height: Optional[int] = None
+    max_width: int | None = None
+    max_height: int | None = None
 
 
 VideoValidationConfig = VideoLoaderConfig
 
 
-def probe_video_metadata(video_path: str | Path, timeout_sec: float = 10.0) -> Dict[str, Any]:
+def probe_video_metadata(video_path: str | Path, timeout_sec: float = 10.0) -> dict[str, Any]:
     path = Path(video_path)
     if not path.exists() or not path.is_file():
         raise VideoLoadError(f"Video faylı tapılmadı: {path}")
@@ -119,7 +120,7 @@ def probe_video_metadata(video_path: str | Path, timeout_sec: float = 10.0) -> D
         except ValueError:
             frame_count = 0
     if frame_count == 0 and duration > 0 and fps > 0:
-        frame_count = int(round(duration * fps))
+        frame_count = round(duration * fps)
 
     return {
         "width": width,
@@ -132,8 +133,8 @@ def probe_video_metadata(video_path: str | Path, timeout_sec: float = 10.0) -> D
 
 def validate_video(
     video_path: str | Path,
-    config: Optional[VideoLoaderConfig] = None,
-) -> Dict[str, Any]:
+    config: VideoLoaderConfig | None = None,
+) -> dict[str, Any]:
     cfg = config or VideoLoaderConfig()
     if cfg.probe_timeout_sec <= 0:
         raise InvalidConfigError("probe_timeout_sec müsbət olmalıdır.")
@@ -149,18 +150,18 @@ class VideoStreamReader:
     def __init__(
         self,
         video_path: str | Path,
-        config: Optional[VideoLoaderConfig] = None,
+        config: VideoLoaderConfig | None = None,
     ) -> None:
         self.path = Path(video_path)
         self.config = config or VideoLoaderConfig()
-        self.metadata: Dict[str, Any] = {}
-        self._cap: Optional[cv2.VideoCapture] = None
+        self.metadata: dict[str, Any] = {}
+        self._cap: cv2.VideoCapture | None = None
 
     @property
-    def cap(self) -> Optional[cv2.VideoCapture]:
+    def cap(self) -> cv2.VideoCapture | None:
         return self._cap
 
-    def __enter__(self) -> "VideoStreamReader":
+    def __enter__(self) -> Self:
         self.metadata = validate_video(self.path, self.config)
         cap = cv2.VideoCapture(str(self.path))
         if not cap.isOpened():
@@ -169,7 +170,7 @@ class VideoStreamReader:
         self._cap = cap
         return self
 
-    def read_frame(self) -> Optional[np.ndarray]:
+    def read_frame(self) -> np.ndarray | None:
         if self._cap is None:
             raise VideoLoadError("VideoStreamReader konteksti açılmayıb.")
         ok, frame = self._cap.read()
@@ -177,7 +178,12 @@ class VideoStreamReader:
             return None
         return frame
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         if self._cap is not None:
             self._cap.release()
             self._cap = None

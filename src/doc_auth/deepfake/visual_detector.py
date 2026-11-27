@@ -1,7 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar
 
 import cv2
 import numpy as np
@@ -11,7 +11,7 @@ from doc_auth.deepfake.face_detector import FaceDetector
 
 try:
     import torch
-    import torch.nn as nn
+    from torch import nn
 except ImportError:  # pragma: no cover
     torch = None  # type: ignore[assignment]
     nn = None  # type: ignore[assignment]
@@ -19,17 +19,17 @@ except ImportError:  # pragma: no cover
 
 class VisualDetector:
     # Bu m?hitd? h?qiq?t?n y?kl?n? bil?n formatlar (.npz h?mi??, .pt/.pth yaln?z torch olduqda)
-    SUPPORTED_SUFFIXES = {".npz", ".pt", ".pth"}
+    SUPPORTED_SUFFIXES: ClassVar[set[str]] = {".npz", ".pt", ".pth"}
 
     def __init__(
         self,
-        model_path: Optional[str | Path] = None,
-        checkpoint_path: Optional[str | Path] = None,
+        model_path: str | Path | None = None,
+        checkpoint_path: str | Path | None = None,
         threshold: float = 0.5,
-        face_detector: Optional[FaceDetector] = None,
+        face_detector: FaceDetector | None = None,
         input_size: tuple[int, int] = (224, 224),
         device: str = "cpu",
-        expected_sha256: Optional[str] = None,
+        expected_sha256: str | None = None,
     ) -> None:
         if (
             isinstance(threshold, bool)
@@ -47,7 +47,7 @@ class VisualDetector:
         self.expected_sha256 = expected_sha256.strip().lower() if expected_sha256 else None
         self._weights_verified = False
         self._model: Any = None
-        self._weights_data: Optional[Dict[str, np.ndarray]] = None
+        self._weights_data: dict[str, np.ndarray] | None = None
 
     @staticmethod
     def compute_file_sha256(file_path: Path, chunk_size: int = 65536) -> str:
@@ -85,7 +85,7 @@ class VisualDetector:
         self._weights_verified = True
         return True
 
-    def load_model(self) -> Dict[str, Any]:
+    def load_model(self) -> dict[str, Any]:
         self.verify_model_weights()
         assert self.checkpoint_path is not None
         suffix = self.checkpoint_path.suffix.lower()
@@ -222,8 +222,8 @@ class VisualDetector:
     def analyze_frame(
         self,
         frame: np.ndarray,
-        faces: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        faces: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
             return {
                 "status": "invalid_frame",
@@ -244,7 +244,7 @@ class VisualDetector:
             }
 
         h, w = frame.shape[:2]
-        face_predictions: List[Dict[str, Any]] = []
+        face_predictions: list[dict[str, Any]] = []
         for idx, face in enumerate(detected_faces):
             bbox = face.get("bbox") if isinstance(face, dict) else face
             if bbox and len(bbox) >= 4:

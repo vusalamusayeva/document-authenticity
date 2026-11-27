@@ -1,5 +1,6 @@
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 
 def compute_iou(box_a: Sequence[float], box_b: Sequence[float]) -> float:
@@ -26,14 +27,14 @@ def compute_iou(box_a: Sequence[float], box_b: Sequence[float]) -> float:
 
 
 def assign_face_tracks(
-    frame_items: List[Dict[str, Any]],
+    frame_items: list[dict[str, Any]],
     iou_threshold: float = 0.3,
     max_time_gap: float = 1.0,
-) -> List[Dict[str, Any]]:
-    active_tracks: List[Dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    active_tracks: list[dict[str, Any]] = []
     next_track_id = 1
-    tracked_records: List[Dict[str, Any]] = []
-    prev_frame_ts: Optional[float] = None
+    tracked_records: list[dict[str, Any]] = []
+    prev_frame_ts: float | None = None
 
     for idx, item in enumerate(frame_items):
         frame_idx = item.get("frame_index", idx)
@@ -98,7 +99,7 @@ class TemporalAnalyzer:
         self.max_time_gap = float(max_time_gap)
         self.high_jump_threshold = float(high_jump_threshold)
 
-    def analyze(self, tracked_faces: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    def analyze(self, tracked_faces: list[dict[str, Any]] | None) -> dict[str, Any]:
         if not tracked_faces:
             return {
                 "status": "no_data",
@@ -109,20 +110,20 @@ class TemporalAnalyzer:
                 "tracks_analyzed": 0,
             }
 
-        grouped: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+        grouped: dict[Any, list[dict[str, Any]]] = defaultdict(list)
         for rec in tracked_faces:
             grouped[rec.get("track_id", 0)].append(rec)
 
-        deltas: List[float] = []
+        deltas: list[float] = []
         high_jumps = 0
         scene_cuts_ignored = 0
 
-        for _tid, items in grouped.items():
+        for items in grouped.values():
             ordered = sorted(
                 items,
                 key=lambda x: (float(x.get("timestamp", 0.0)), int(x.get("frame_index", 0))),
             )
-            prev_valid: Optional[Dict[str, Any]] = None
+            prev_valid: dict[str, Any] | None = None
             for cur in ordered:
                 if cur.get("scene_cut") is True:
                     scene_cuts_ignored += 1
