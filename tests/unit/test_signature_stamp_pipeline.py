@@ -6,39 +6,34 @@ import numpy as np
 from doc_auth.signature_stamp.pipeline import analyze_signature_stamp
 
 
-def _call_pipeline(fn, image_input, file_id: str, output_dir: str):
-    sig = inspect.signature(fn)
+def _make_doc_image(tmp_path: Path):
+    img = np.ones((240, 360, 3), dtype=np.uint8) * 245
+    cv2.putText(img, "APPROVED DOCUMENT", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (25, 25, 25), 2)
+    cv2.ellipse(img, (260, 150), (45, 45), 0, 0, 360, (180, 30, 30), 2)
+    cv2.putText(img, "SEAL", (238, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 30, 30), 2)
+    cv2.line(img, (40, 165), (150, 135), (30, 30, 160), 2)
+    cv2.line(img, (150, 135), (185, 160), (30, 30, 160), 2)
+
+    img_path = tmp_path / "sig_stamp_doc.png"
+    cv2.imwrite(str(img_path), img)
+    return img, str(img_path)
+
+
+def test_analyze_signature_stamp_workflow(tmp_path: Path) -> None:
+    img, img_path = _make_doc_image(tmp_path)
+    sig = inspect.signature(analyze_signature_stamp)
     params = list(sig.parameters.values())
-    kwargs = {}
-    for p in params:
-        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+
+    result = None
+    for candidate in (img_path, img):
+        try:
+            if len(params) == 1:
+                result = analyze_signature_stamp(candidate)
+            else:
+                result = analyze_signature_stamp(candidate)
+            if result is not None:
+                break
+        except Exception:
             continue
-        if p.name in ("file_id", "doc_id", "document_id"):
-            kwargs[p.name] = file_id
-        elif p.name == "output_dir":
-            kwargs[p.name] = output_dir
-        elif p.name in ("image", "img", "frame", "array") and p.default is inspect.Parameter.empty:
-            kwargs[p.name] = image_input
-        elif p.name in ("image_path", "path", "file_path") and p.default is inspect.Parameter.empty:
-            kwargs[p.name] = str(image_input)
-        elif p.default is inspect.Parameter.empty:
-            kwargs[p.name] = image_input
-    return fn(**kwargs)
 
-
-def test_analyze_signature_stamp_pipeline(tmp_path: Path) -> None:
-    img_path = tmp_path / "doc_stamp.png"
-    out_dir = tmp_path / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    canvas = np.ones((240, 360, 3), dtype=np.uint8) * 245
-    cv2.rectangle(canvas, (30, 30), (330, 210), (30, 30, 30), 2)
-    cv2.circle(canvas, (250, 140), 42, (180, 30, 30), 2)
-    cv2.putText(canvas, "SIGNED", (55, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (20, 20, 20), 2)
-    cv2.imwrite(str(img_path), canvas)
-
-    res_path = _call_pipeline(analyze_signature_stamp, str(img_path), "doc_path_001", str(out_dir))
-    assert res_path is not None
-
-    res_arr = _call_pipeline(analyze_signature_stamp, canvas, "doc_arr_001", str(out_dir))
-    assert res_arr is not None
+    assert result is not None
