@@ -1,90 +1,88 @@
 ﻿from pathlib import Path
-import os
-import time
+from typing import Any
+
+import fitz  # type: ignore
 import pytest
-import cv2
-import numpy as np
+from PIL import Image, PngImagePlugin
 
 from doc_auth.metadata.metadata_analysis import MetadataAnalyzer
 
 
-def test_metadata_analyzer_init_and_path_resolution(tmp_path: Path) -> None:
+def test_metadata_analyzer_invalid_chunk_size_and_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         MetadataAnalyzer(chunk_size=0)
 
-    analyzer = MetadataAnalyzer(chunk_size=16)
-    sample = tmp_path / "doc.txt"
-    sample.write_bytes(b"hello metadata world" * 5)
-
-    assert analyzer._resolve_path(str(sample)) == sample
-    assert analyzer._resolve_path(sample) == sample
-    assert analyzer._resolve_path({"file_path": str(sample)}) == sample
-    assert analyzer._resolve_path({"file_path": str(tmp_path / "missing.txt")}) is None
-    assert analyzer._resolve_path(tmp_path / "missing.txt") is None
-    assert analyzer._resolve_path(12345) is None
-
-    digest = analyzer._compute_full_sha256(sample)
-    assert isinstance(digest, str) and len(digest) == 64
-
-
-def test_metadata_analyzer_image_and_corrupt_file(tmp_path: Path) -> None:
     analyzer = MetadataAnalyzer()
-
-    img_path = tmp_path / "sample.png"
-    canvas = np.ones((120, 180, 3), dtype=np.uint8) * 230
-    cv2.putText(canvas, "META", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
-    cv2.imwrite(str(img_path), canvas)
-
-    meta, errors = analyzer._extract_embedded_metadata(img_path, ".png")
-    assert meta.get("format") == "PNG"
-    assert meta.get("size") == [180, 120]
-    assert errors == []
-
-    bad_img = tmp_path / "corrupt.png"
-    bad_img.write_bytes(b"not-a-valid-png")
-    _, bad_errors = analyzer._extract_embedded_metadata(bad_img, ".png")
-    assert len(bad_errors) >= 1
-
-
-def test_metadata_analyze_signals_and_wrappers(tmp_path: Path, monkeypatch) -> None:
-    analyzer = MetadataAnalyzer()
-
-    missing_res = analyzer.analyze(tmp_path / "does_not_exist.pdf")
+    missing_res = analyzer.analyze(tmp_path / "missing.pdf")
     assert missing_res["status"] == "not_found"
     assert missing_res["suspicious"] is None
 
-    empty_file = tmp_path / "empty.pdf"
-    empty_file.write_bytes(b"")
-    empty_res = analyzer.analyze(empty_file)
-    assert empty_res["suspicious"] is True
-    assert any(sig["field"] == "size_bytes" for sig in empty_res["suspicious_signals"])
 
-    no_ext = tmp_path / "noext_file"
-    no_ext.write_bytes(b"plain text content")
-    no_ext_res = analyzer.analyze(no_ext)
-    assert no_ext_res["suspicious"] is True
-    assert any(sig["field"] == "extension" for sig in no_ext_res["suspicious_signals"])
+def test_metadata_analyzer_image_info_and_exif_editor_marker(tmp_path: Path) -> None:
+    img_path = tmp_path / "sample.png"
+    img = Image.new("RGB", (24, 24), color=(100, 150, 200))
+    png_info = PngImagePlugin.PngInfo()
+    png_info.add_text("Software", "Adobe Photoshop 2025")
+    png_info.add_text("Author", "QA Tester")
+    img.save(img_path, pnginfo=png_info)
 
-    doc_file = tmp_path / "edited.pdf"
-    doc_file.write_bytes(b"%PDF-1.4 fake test")
-
-    now = time.time()
-    os.utime(doc_file, (now - 120, now - 120))
-    stat = doc_file.stat()
-    os.utime(doc_file, (stat.st_atime, stat.st_ctime - 10.0))
-
-    monkeypatch.setattr(
-        analyzer,
-        "_extract_embedded_metadata",
-        lambda _p, _ext: ({"pdf_producer": "Adobe Photoshop 2026"}, []),
-    )
-
-    res = analyzer.analyze(doc_file)
+    analyzer = MetadataAnalyzer(chunk_size=16)
+    res = analyzer.extract({"file_path": str(img_path)})
     assert res["status"] == "success"
+    assert res["metadata_present"] is True
+    assert res["metadata"]["Software"] == "Adobe Photoshop 2025"
+    assert res["metadata"]["Author"] == "QA Tester"
     assert res["suspicious"] is True
-    assert any(sig["field"] == "modified_at_utc" for sig in res["suspicious_signals"])
-    assert any(sig["field"] == "pdf_producer" for sig in res["suspicious_signals"])
+    assert any("photoshop" in r.lower() for r in res["reasons"])
 
-    assert analyzer.extract(doc_file)["suspicious"] is True
-    assert analyzer.inspect(doc_file)["suspicious"] is True
-    assert analyzer(doc_file)["suspicious"] is True
+
+def test_metadata_analyzer_exif_dict_and_pdf_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Simulate PIL Image with Exif tags including Software & raw bytes
+    img_path = tmp_path / "exif_img.jpg"
+    img_path.write_bytes(b"\xff\xd8\xff\xd9")
+
+    class _FakeExif(dict):
+        def __bool__(self) -> bool:
+            return True
+
+    class _FakeImg:
+        format = "JPEG"
+        mode = "RGB"
+        size = (30, 20)
+        info: dict[str, Any] = {"comment": "ok", "exif": b"raw-bytes"}
+
+        def __enter__(self) -> "_FakeImg":
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            return None
+
+        def getexif(self) -> _FakeExif:
+            return _FakeExif({305: "GIMP 2.10", 271: b"\x00\x01"})
+
+    import PIL.Image as pil_image
+    import PIL.ExifTags as pil_exif
+
+    monkeypatch.setattr(pil_image, "open", lambda p: _FakeImg())
+    monkeypatch.setattr(pil_exif.TAGS, "get", lambda tag_id, default=None: {305: "Software", 271: "Make"}.get(tag_id, default))
+
+    analyzer = MetadataAnalyzer()
+    img_res = analyzer.inspect(img_path)
+    assert img_res["status"] == "success"
+    assert img_res["metadata"]["exif"]["Software"] == "GIMP 2.10"
+    assert img_res["suspicious"] is True
+
+    # PDF metadata via PyMuPDF
+    pdf_path = tmp_path / "doc.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Test PDF")
+    doc.set_metadata({"title": "Report", "author": "Analyst", "creator": "LibreOffice Writer"})
+    doc.save(pdf_path)
+    doc.close()
+
+    pdf_res = analyzer(pdf_path)
+    assert pdf_res["status"] == "success"
+    assert pdf_res["metadata"]["pdf_page_count"] == 1
+    assert pdf_res["metadata"]["pdf_creator"] == "LibreOffice Writer"
+    assert pdf_res["suspicious"] is True
