@@ -1,39 +1,104 @@
 ﻿from pathlib import Path
-import cv2
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
+import pytest
 
-from doc_auth.deepfake.frame_sampler import (
-    FrameSampler,
-    FrameSamplingConfig,
-    sample_video_frames,
-)
-
-
-def _make_video(video_path: Path, num_frames: int = 10) -> Path:
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(video_path), fourcc, 10.0, (128, 128))
-    for i in range(num_frames):
-        frame = np.full((128, 128, 3), 150 + (i * 7) % 80, dtype=np.uint8)
-        cv2.rectangle(frame, (20, 20), (108, 108), (50, 90, 170), 2)
-        writer.write(frame)
-    writer.release()
-    return video_path
+from doc_auth.deepfake import frame_sampler as fs_mod
+from doc_auth.deepfake.exceptions import InvalidConfigError, VideoValidationError
+from doc_auth.deepfake.frame_sampler import FrameSampler, FrameSamplingConfig, sample_video_frames
 
 
-def test_frame_sampler_and_helper(tmp_path: Path) -> None:
-    vid_path = _make_video(tmp_path / "sample.mp4", num_frames=10)
-    cfg = FrameSamplingConfig()
-    assert cfg is not None
-    sampler = FrameSampler()
+class _FakeCap:
+    def __init__(
+        self,
+        frames: List[Tuple[bool, Any]],
+        pos_msec_seq: List[float] | None = None,
+        native_fps: float = 0.0,
+        boom_on_read: bool = False,
+    ) -> None:
+        self._frames = list(frames)
+        self._pos_seq = list(pos_msec_seq or [])
+        self._native_fps = native_fps
+        self._boom_on_read = boom_on_read
+        self._idx = 0
 
-    sampled = list(sampler.sample(vid_path))
-    assert len(sampled) >= 1
+    def get(self, prop_id: int) -> float:
+        if prop_id == 5:
+            return self._native_fps
+        if prop_id == 0:
+            if self._pos_seq:
+                i = min(self._idx - 1, len(self._pos_seq) - 1)
+                return self._pos_seq[max(i, 0)]
+            return 0.0
+        return 0.0
 
-    via_call = list(sampler(vid_path))
-    assert len(via_call) >= 1
+    def read(self) -> Tuple[bool, Any]:
+        if self._boom_on_read:
+            raise RuntimeError("cap read failure")
+        if self._idx >= len(self._frames):
+            return False, None
+        item = self._frames[self._idx]
+        self._idx += 1
+        return item
 
-    via_frames = list(sampler.sample_frames(vid_path))
-    assert len(via_frames) >= 1
 
-    direct_frames = list(sample_video_frames(vid_path))
-    assert len(direct_frames) >= 1
+class _FakeReader:
+    def __init__(self, cap: _FakeCap, metadata: Dict[str, Any] | None = None) -> None:
+        self.cap = cap
+        self.metadata = metadata if metadata is not None else {}
+
+    def __enter__(self) -> "_FakeReader":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        return None
+
+
+def test_frame_sampling_config_validation() -> None:
+    with pytest.raises(InvalidConfigError):
+        FrameSamplingConfig(sampling_fps=True)  # type: ignore[arg-type]
+    with pytest.raises(InvalidConfigError):
+        FrameSamplingConfig(sampling_fps=0.0)
+    with pytest.raises(InvalidConfigError):
+        FrameSamplingConfig(max_frames=False)  # type: ignore[arg-type]
+    with pytest.raises(InvalidConfigError):
+        FrameSamplingConfig(max_frames=0)
+
+
+def test_sample_video_frames_and_sampler_wrappers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    dummy_video = tmp_path / "sample.mp4"
+    dummy_video.write_bytes(b"fake")
+
+    f1 = np.zeros((8, 8, 3), dtype=np.uint8)
+    f2 = np.ones((8, 8, 3), dtype=np.uint8) * 50
+    f3 = np.ones((8, 8, 3), dtype=np.uint8) * 100
+
+    # native_fps <= 0 falls back to 25.0; pos_msec == 0 uses raw_idx / native_fps
+    cap = _FakeCap(
+        frames=[(True, f1), (True, f2), (True, f3), (False, None)],
+        pos_msec_seq=[0.0, 0.0, 0.0],
+        native_fps=0.0,
+    )
+    monkeypatch.setattr(fs_mod, "VideoStreamReader", lambda path, cfg: _FakeReader(cap, metadata={"fps": None}))
+
+    sampler = FrameSampler(sampling_fps=25.0, max_frames=2)
+    stream_items = list(sampler.sample_frames(dummy_video))
+    assert len(stream_items) == 2
+    assert stream_items[0]["sample_index"] == 0
+    assert stream_items[1]["sample_index"] == 1
+
+    collected = sampler.sample(dummy_video)
+    assert len(collected) == 0  # stream already consumed
+
+    cap2 = _FakeCap(frames=[(True, f1), (True, f2)], pos_msec_seq=[1000.0, 2000.0], native_fps=30.0)
+    monkeypatch.setattr(fs_mod, "VideoStreamReader", lambda path, cfg: _FakeReader(cap2, metadata={"fps": 30.0}))
+    via_call = list(sampler(dummy_video))
+    assert len(via_call) == 1
+    assert via_call[0]["timestamp"] == pytest.approx(1.0)
+
+    # Unexpected exception inside reader is wrapped in VideoValidationError
+    boom_cap = _FakeCap(frames=[], boom_on_read=True)
+    monkeypatch.setattr(fs_mod, "VideoStreamReader", lambda path, cfg: _FakeReader(boom_cap))
+    with pytest.raises(VideoValidationError):
+        list(sample_video_frames(dummy_video))
