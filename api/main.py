@@ -3,6 +3,7 @@ from typing import Any, Dict
 from fastapi import FastAPI, HTTPException, Request
 import uuid
 
+from api.services.analysis_service import AnalysisService
 from doc_auth.api import create_document_router
 from doc_auth.deepfake.api import attach_deepfake_router
 
