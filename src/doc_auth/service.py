@@ -71,7 +71,7 @@ class AnalysisService:
             if model_path.exists() and model_path.is_file() and hasattr(DocumentClassifier, "load"):
                 try:
                     self.classifier = DocumentClassifier.load(str(model_path))
-                except Exception:
+                except (OSError, ValueError, RuntimeError):
                     self.classifier = DocumentClassifier()
             else:
                 self.classifier = DocumentClassifier()
@@ -139,7 +139,7 @@ class AnalysisService:
                     if isinstance(out, dict):
                         return out
                     return {"status": "success", "predictions": out}
-                except Exception as exc:
+                except (OSError, ValueError, TypeError, RuntimeError) as exc:
                     return {"status": "unavailable", "error": str(exc)}
         return {"status": "unavailable", "error": "Uyğun klassifikasiya metodu tapılmadı."}
 
