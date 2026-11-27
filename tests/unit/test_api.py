@@ -88,7 +88,7 @@ def test_document_router_and_app_endpoints(
     assert res_ok.status_code == 200
     assert res_ok.json()["decision"] == "authentic"
 
-    c_obj = TestClient(doc_api.create_document_router(analysis_service=_DummyService(mode="summary_obj")))
+    c_obj = TestClient(doc_api.create_app(analysis_service=_DummyService(mode="summary_obj")))
     res_obj = c_obj.post("/v1/analyze", files={"file": ("doc.png", png_bytes, "image/png")})
     assert res_obj.status_code == 200
     assert res_obj.json()["decision"] == "authentic"
