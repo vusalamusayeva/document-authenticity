@@ -1,43 +1,116 @@
-﻿from pathlib import Path
-import inspect
+﻿import builtins
+from pathlib import Path
+import sys
+import types
+
 import cv2
 import numpy as np
+import pytest
 
 from doc_auth.ocr.ocr_check import OCRChecker
 
 
-def _make_text_image(img_path: Path) -> Path:
-    img = np.full((180, 320, 3), 255, dtype=np.uint8)
-    cv2.putText(img, "INVOICE #1024", (25, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (15, 15, 15), 2)
-    cv2.imwrite(str(img_path), img)
-    return img_path
+def test_ocr_checker_init_validation() -> None:
+    with pytest.raises(ValueError):
+        OCRChecker(min_text_density=-0.01)
+    with pytest.raises(ValueError):
+        OCRChecker(min_text_density=1.1)
+    with pytest.raises(ValueError):
+        OCRChecker(min_confidence=-0.1)
+    with pytest.raises(ValueError):
+        OCRChecker(min_confidence=1.2)
 
 
-def _call_with_path(fn, target_path: Path):
-    sig = inspect.signature(fn)
-    params = [p for name, p in sig.parameters.items() if name != "self"]
-    if not params:
-        return fn()
-    try:
-        return fn(target_path)
-    except TypeError:
-        return fn(str(target_path))
-
-
-def test_ocr_checker_methods_and_missing_file(tmp_path: Path) -> None:
+def test_ocr_checker_resolve_image_and_not_applicable(tmp_path: Path) -> None:
     checker = OCRChecker()
-    assert checker is not None
 
-    img_path = _make_text_image(tmp_path / "invoice.png")
-    for method_name in ("_resolve_image", "_compute_text_density", "check", "run", "analyze", "__call__"):
-        method = getattr(checker, method_name, None)
-        if callable(method):
-            try:
-                res = _call_with_path(method, img_path)
-                assert res is not None
-            except Exception:
-                pass
+    assert checker._resolve_image(np.array([], dtype=np.uint8)) is None
 
-    missing = tmp_path / "missing_doc.png"
-    missing_res = _call_with_path(checker._resolve_image, missing)
-    assert missing_res is None or isinstance(missing_res, dict)
+    img_path = tmp_path / "sample.png"
+    img = np.full((32, 32, 3), 255, dtype=np.uint8)
+    cv2.putText(img, "ABC", (2, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    assert cv2.imwrite(str(img_path), img)
+
+    resolved = checker._resolve_image({"document_path": str(img_path)})
+    assert isinstance(resolved, np.ndarray) and resolved.size > 0
+
+    none_res = checker.check({"path": str(tmp_path / "missing.png")})
+    assert none_res["status"] == "not_applicable"
+    assert none_res["has_text"] is None
+
+
+def test_ocr_checker_tesseract_missing_and_easyocr_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checker = OCRChecker(min_text_density=0.0, min_confidence=0.5, lang="eng")
+    gray = np.full((40, 120), 255, dtype=np.uint8)
+    cv2.putText(gray, "TEST", (5, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+
+    # 1. Missing tesseract binary -> RuntimeError in _run_tesseract, fallback to easyocr
+    fake_pytesseract = types.SimpleNamespace(
+        pytesseract=types.SimpleNamespace(tesseract_cmd="nonexistent_tesseract_bin"),
+        Output=types.SimpleNamespace(DICT="dict"),
+        image_to_data=lambda *a, **kw: {},
+    )
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_pytesseract)
+    monkeypatch.setattr("shutil.which", lambda exe: None)
+
+    class _FakeReader:
+        def __init__(self, langs, gpu=False, verbose=False) -> None:
+            self.langs = langs
+
+        def readtext(self, arr):
+            return [([[0, 0], [10, 0], [10, 10], [0, 10]], "FALLBACK", 0.9)]
+
+    monkeypatch.setitem(sys.modules, "easyocr", types.SimpleNamespace(Reader=_FakeReader))
+
+    res = checker.check(gray)
+    assert res["status"] == "success"
+    assert res["engine"] == "easyocr"
+    assert res["text"] == "FALLBACK"
+    assert res["suspicious"] is False
+    assert checker.run(gray) == res
+    assert checker.analyze(gray) == res
+    assert checker(gray) == res
+
+    # 2. Both engines fail -> ocr_unavailable
+    def _fail_import(name, *args, **kwargs):
+        if name in {"pytesseract", "easyocr"}:
+            raise ImportError(f"no {name}")
+        return orig_import(name, *args, **kwargs)
+
+    orig_import = builtins.__import__
+    monkeypatch.setattr(builtins, "__import__", _fail_import)
+    unavail = checker.check(gray)
+    assert unavail["status"] == "ocr_unavailable"
+    assert "error" in unavail
+
+
+def test_ocr_checker_tesseract_invalid_conf_and_low_confidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checker = OCRChecker(min_text_density=0.0, min_confidence=0.8)
+    gray = np.full((32, 100), 255, dtype=np.uint8)
+    cv2.putText(gray, "LOW", (5, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+
+    fake_pytesseract = types.SimpleNamespace(
+        pytesseract=types.SimpleNamespace(tesseract_cmd="tesseract"),
+        Output=types.SimpleNamespace(DICT="dict"),
+        image_to_data=lambda *a, **kw: {
+            "text": ["", "LOW", "BADCONF"],
+            "conf": [-1, "40", "not_a_number"],
+            "left": [0, 5, 40],
+            "top": [0, 5, 5],
+            "width": [0, 30, 40],
+            "height": [0, 20, 20],
+        },
+    )
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_pytesseract)
+    monkeypatch.setattr("shutil.which", lambda exe: "C:/fake/tesseract.exe")
+
+    res = checker.check(gray)
+    assert res["status"] == "success"
+    assert res["engine"] == "tesseract"
+    assert res["text"] == "LOW BADCONF"
+    assert res["has_text"] is True
+    assert res["suspicious"] is True
