@@ -69,3 +69,8 @@ def test_temporal_analyzer_no_data_time_gap_and_high_jumps() -> None:
     assert res["status"] == "success"
     assert res["high_jumps"] == 1
     assert res["scene_cuts_ignored"] == 1
+from doc_auth.deepfake.temporal_analysis import compute_iou
+
+
+def test_compute_iou_returns_zero_when_union_area_is_zero() -> None:
+    assert compute_iou([2.0, 2.0, 2.0, 2.0], [2.0, 2.0, 2.0, 2.0]) == 0.0
