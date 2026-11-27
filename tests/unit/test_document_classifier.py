@@ -124,3 +124,28 @@ def test_fit_errors_predict_classify_evaluate_and_persistence(tmp_path: Path) ->
         pickle.dump({"not": "a classifier"}, f)
     with pytest.raises(TypeError):
         DocumentClassifier.load(str(wrong_type_path))
+from pathlib import Path
+import numpy as np
+import pytest
+
+from doc_auth.classification.document_classifier import DocumentClassifier
+
+
+def test_document_classifier_single_class_fit_and_single_path_predict_proba(
+    tmp_path: Path,
+) -> None:
+    clf = DocumentClassifier()
+    x_items = [{"features": [1.0, 0.2]}, {"features": [2.0, 0.8]}]
+
+    with pytest.raises(ValueError):
+        clf.fit(x_items, ["id_card", "id_card"])
+
+    clf.fit(x_items, ["id_card", "passport"])
+    img_path = tmp_path / "sample.png"
+    arr = np.full((32, 32, 3), 200, dtype=np.uint8)
+    import cv2
+
+    cv2.imwrite(str(img_path), arr)
+
+    probs = clf.predict_proba(img_path)
+    assert probs.shape == (1, len(clf.classes))
