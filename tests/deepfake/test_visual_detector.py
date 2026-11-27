@@ -14,7 +14,7 @@ def test_visual_detector_loads_torch_checkpoint_and_infers(
     import doc_auth.deepfake.visual_detector as vd_mod
 
     fake_nn = types.SimpleNamespace(Module=type("_FakeModule", (), {}))
-    fake_torch = types.SimpleNamespace(load=lambda *a, **kw: {"epoch": 1, "state_dict": {}})
+    fake_torch = types.SimpleNamespace(load=lambda *a, **kw: {"epoch": 1, "state_dict": {"weight": [0.1]}})
     monkeypatch.setattr(vd_mod, "nn", fake_nn, raising=False)
     monkeypatch.setattr(vd_mod, "torch", fake_torch, raising=False)
 
