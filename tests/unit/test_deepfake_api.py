@@ -1,7 +1,8 @@
 ﻿import asyncio
+from io import BytesIO
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.testclient import TestClient
 import pytest
 
@@ -80,7 +81,6 @@ def test_router_unready_and_error_branches(monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert r_analyze_503.status_code == 503
 
-    # Test _default_runner directly when state is not ready
     router_unready = df_api.create_deepfake_router()
     analyze_fn = None
     for route in router_unready.routes:
@@ -89,17 +89,22 @@ def test_router_unready_and_error_branches(monkeypatch: pytest.MonkeyPatch) -> N
             break
     assert analyze_fn is not None
 
+    upload_no_name = UploadFile(filename="", file=BytesIO(b"123"))
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(analyze_fn(upload_no_name))
+    assert exc_info.value.status_code == 400
+
 
 def test_analyze_endpoint_status_codes_and_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
 
-    # 1. Empty filename -> 400
+    # 1. Empty filename via multipart -> FastAPI returns 422
     router_400 = df_api.create_deepfake_router(pipeline_runner=lambda p: {"ok": True})
     app.include_router(router_400)
     client = TestClient(app)
 
     res_empty_name = client.post("/deepfake/analyze", files={"file": ("", b"123", "video/mp4")})
-    assert res_empty_name.status_code == 400
+    assert res_empty_name.status_code == 422
 
     # 2. Empty file content -> 400
     res_empty_bytes = client.post("/deepfake/analyze", files={"file": ("a.mp4", b"", "video/mp4")})
