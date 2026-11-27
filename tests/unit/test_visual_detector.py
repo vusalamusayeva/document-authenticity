@@ -1,11 +1,8 @@
 ﻿import json
 from pathlib import Path
-import types
 
 import numpy as np
 import pytest
-import torch
-import torch.nn as nn
 
 from doc_auth.deepfake.exceptions import InvalidConfigError, ModelUnavailableError
 from doc_auth.deepfake.visual_detector import VisualDetector
@@ -53,6 +50,8 @@ def test_visual_detector_threshold_and_weight_verification(
     monkeypatch.setattr("doc_auth.deepfake.visual_detector.torch", None)
     with pytest.raises(ModelUnavailableError):
         VisualDetector(model_path=pt_file).verify_model_weights()
+    with pytest.raises(ModelUnavailableError):
+        VisualDetector(model_path=pt_file).load_model()
 
     npz_file = tmp_path / "valid.npz"
     _make_valid_npz(npz_file)
@@ -66,13 +65,11 @@ def test_visual_detector_threshold_and_weight_verification(
 
 
 def test_visual_detector_npz_loading_and_validation_errors(tmp_path: Path) -> None:
-    # Missing keys
     p_missing = tmp_path / "missing_keys.npz"
     np.savez(p_missing, weights=np.zeros(4, dtype=np.float32))
     with pytest.raises(ModelUnavailableError):
         VisualDetector(model_path=p_missing).load_model()
 
-    # Wrong shapes
     p_shape = tmp_path / "bad_shape.npz"
     np.savez(
         p_shape,
@@ -83,7 +80,6 @@ def test_visual_detector_npz_loading_and_validation_errors(tmp_path: Path) -> No
     with pytest.raises(ModelUnavailableError):
         VisualDetector(model_path=p_shape).load_model()
 
-    # Non-finite values
     p_nan = tmp_path / "nan.npz"
     np.savez(
         p_nan,
@@ -94,13 +90,11 @@ def test_visual_detector_npz_loading_and_validation_errors(tmp_path: Path) -> No
     with pytest.raises(ModelUnavailableError):
         VisualDetector(model_path=p_nan).load_model()
 
-    # input_size mismatch
     p_size = tmp_path / "bad_size.npz"
     _make_valid_npz(p_size, input_size=(128, 128))
     with pytest.raises(ModelUnavailableError):
         VisualDetector(model_path=p_size, input_size=(224, 224)).load_model()
 
-    # class_mapping mismatch
     p_map = tmp_path / "bad_map.npz"
     np.savez(
         p_map,
@@ -112,17 +106,14 @@ def test_visual_detector_npz_loading_and_validation_errors(tmp_path: Path) -> No
     with pytest.raises(ModelUnavailableError):
         VisualDetector(model_path=p_map).load_model()
 
-    # Corrupt archive
     p_corrupt = tmp_path / "corrupt.npz"
     p_corrupt.write_bytes(b"not-a-zip-archive")
     with pytest.raises(ModelUnavailableError):
         VisualDetector(model_path=p_corrupt).load_model()
 
-    # Valid NPZ + cached reload + region score + analyze_frame without bbox
     p_ok = tmp_path / "ok.npz"
-    _make_valid_npz(p_ok)
-    det = VisualDetector(model_path=p_ok, input_size=(64, 64))
     _make_valid_npz(p_ok, input_size=(64, 64))
+    det = VisualDetector(model_path=p_ok, input_size=(64, 64))
     info1 = det.load_model()
     assert info1["backend"] == "numpy_linear_model"
     info2 = det.load_model()
@@ -135,6 +126,9 @@ def test_visual_detector_npz_loading_and_validation_errors(tmp_path: Path) -> No
 
 
 def test_visual_detector_torch_checkpoint_and_unloaded_score(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    nn = torch.nn
+
     pt_mod_path = tmp_path / "module.pt"
     torch.save(nn.Linear(4, 2), pt_mod_path)
     det_mod = VisualDetector(checkpoint_path=pt_mod_path)
@@ -142,7 +136,6 @@ def test_visual_detector_torch_checkpoint_and_unloaded_score(tmp_path: Path) -> 
     assert res_mod["backend"] == "torch_checkpoint"
     assert res_mod["status"] == "loaded"
 
-    # Torch checkpoint loaded, but _weights_data is None -> _compute_region_score raises ModelUnavailableError
     with pytest.raises(ModelUnavailableError):
         det_mod._compute_region_score(np.ones((16, 16, 3), dtype=np.uint8))
 
