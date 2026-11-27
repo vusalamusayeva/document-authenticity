@@ -1,5 +1,4 @@
 ﻿from pathlib import Path
-import inspect
 import cv2
 import numpy as np
 
@@ -15,7 +14,7 @@ def _make_face_frame() -> np.ndarray:
     return frame
 
 
-def test_visual_detector_sha256_and_frame_methods(tmp_path: Path) -> None:
+def test_visual_detector_sha256_and_edge_frames(tmp_path: Path) -> None:
     sample_file = tmp_path / "weights.bin"
     sample_file.write_bytes(b"synthetic-weights-payload")
 
@@ -23,18 +22,35 @@ def test_visual_detector_sha256_and_frame_methods(tmp_path: Path) -> None:
     assert isinstance(sha, str) and len(sha) == 64
 
     detector = VisualDetector()
-    assert detector is not None
+    invalid_res = detector.analyze_frame(None)  # type: ignore[arg-type]
+    assert invalid_res["status"] == "invalid_frame"
 
     frame = _make_face_frame()
-    sig = inspect.signature(detector.analyze_frame)
-    params = [p for name, p in sig.parameters.items() if name != "self"]
-    try:
-        if len(params) == 0:
-            res = detector.analyze_frame()
-        elif len(params) == 1:
-            res = detector.analyze_frame(frame)
-        else:
-            res = detector.analyze_frame(frame, [20, 20, 140, 140])
-        assert res is not None
-    except Exception:
-        pass
+    no_face_res = detector.analyze_frame(frame, faces=[])
+    assert no_face_res["status"] == "no_face"
+
+    empty_patch = np.zeros((0, 0, 3), dtype=np.uint8)
+    assert detector._compute_region_score(empty_patch) == 0.0
+
+
+def test_visual_detector_features_scoring_and_analyze_frame() -> None:
+    detector = VisualDetector()
+    frame = _make_face_frame()
+
+    feats = detector._extract_features(frame)
+    assert feats.shape == (4,)
+    assert feats.dtype == np.float32
+
+    detector._weights_data = {
+        "weights": np.array([0.1, -0.1, 0.05, 0.2], dtype=np.float32),
+        "bias": np.array([-0.5], dtype=np.float32),
+        "laplacian_scale": np.array([1.0], dtype=np.float32),
+    }
+
+    score = detector._compute_region_score(frame)
+    assert 0.0 <= score <= 1.0
+
+    res = detector.analyze_frame(frame, faces=[{"bbox": [25, 25, 135, 135]}])
+    assert res["status"] == "success"
+    assert res["face_detected"] is True
+    assert len(res["face_predictions"]) == 1
