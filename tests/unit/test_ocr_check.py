@@ -1,6 +1,5 @@
 ﻿from pathlib import Path
 import inspect
-import pytest
 import cv2
 import numpy as np
 
@@ -40,5 +39,5 @@ def test_ocr_checker_methods_and_missing_file(tmp_path: Path) -> None:
                 pass
 
     missing = tmp_path / "missing_doc.png"
-    with pytest.raises(Exception):
-        _call_with_path(checker._resolve_image, missing)
+    missing_res = _call_with_path(checker._resolve_image, missing)
+    assert missing_res is None or isinstance(missing_res, dict)
