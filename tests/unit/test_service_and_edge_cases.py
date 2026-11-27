@@ -71,3 +71,32 @@ def test_document_classifier_save_load_and_auto_service(tmp_path: Path) -> None:
     if default_model.exists():
         svc = AnalysisService()
         assert getattr(svc.classifier, "_is_fitted", False) is True
+from pathlib import Path
+import pytest
+
+from doc_auth.service import AnalysisService
+
+
+def test_service_init_missing_model_and_classifier_edge_cases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    missing_model = tmp_path / "nonexistent_classifier.pkl"
+    monkeypatch.setenv("DOC_AUTH_CLASSIFIER_PATH", str(missing_model))
+
+    svc = AnalysisService()
+    assert svc.classifier is not None
+
+    class _ListClassifier:
+        def predict(self, _payload: object) -> list[str]:
+            return ["invoice"]
+
+    svc._run_classifier.__self__.classifier = _ListClassifier()
+    res_list = svc._run_classifier({}, {}, document_path=tmp_path / "doc.pdf")
+    assert res_list == {"status": "success", "predictions": ["invoice"]}
+
+    class _NoMethodClassifier:
+        pass
+
+    svc.classifier = _NoMethodClassifier()
+    res_unavail = svc._run_classifier({}, {}, document_path=tmp_path / "doc.pdf")
+    assert res_unavail["status"] == "unavailable"
