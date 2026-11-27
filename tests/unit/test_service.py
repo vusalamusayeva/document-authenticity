@@ -23,12 +23,12 @@ def test_helpers_and_default_explainer(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sanitized["path"] == str(Path("a/b.txt"))
     assert sanitized["items"] == [2, ["x", 1]]
 
-    # _default_explainer fallback to public callable when Explainer absent
     fake_mod = types.SimpleNamespace(build_explainer=lambda: "custom-explainer")
     monkeypatch.setattr(svc_mod, "explain_module", fake_mod)
-    assert svc_mod._default_explainer() == "custom-explainer"
+    got_explainer = svc_mod._default_explainer()
+    assert callable(got_explainer)
+    assert got_explainer() == "custom-explainer"
 
-    # _default_explainer raises RuntimeError when nothing callable exists
     empty_mod = types.SimpleNamespace(_private=lambda: None, constant=123)
     monkeypatch.setattr(svc_mod, "explain_module", empty_mod)
     with pytest.raises(RuntimeError):
@@ -49,25 +49,21 @@ def test_classifier_load_fallback_and_invoke_module(
     svc = svc_mod.AnalysisService(explainer=lambda payload: {"summary": "ok"})
     assert isinstance(svc.classifier, svc_mod.DocumentClassifier)
 
-    # Non-dict return wrapped in {"status": "success", "result": ...}
     comp_val = types.SimpleNamespace(run=lambda x: 42)
     assert svc_mod.AnalysisService._invoke_module(comp_val, ("run",), {"k": 1}) == {
         "status": "success",
         "result": 42,
     }
 
-    # Callable component with dict return
     assert svc_mod.AnalysisService._invoke_module(lambda x: {"ok": True}, ("missing",), {}) == {
         "ok": True
     }
 
-    # Callable component with non-dict return
     assert svc_mod.AnalysisService._invoke_module(lambda x: "done", ("missing",), {}) == {
         "status": "success",
         "result": "done",
     }
 
-    # No matching method and not callable -> RuntimeError
     with pytest.raises(RuntimeError):
         svc_mod.AnalysisService._invoke_module(object(), ("run",), {})
 
@@ -114,7 +110,6 @@ def test_run_classifier_analyze_and_summary(tmp_path: Path) -> None:
     assert isinstance(seen_payloads[0], np.ndarray)
     assert seen_payloads[0].shape == (4, 4, 3)
 
-    # Classifier raising an exception returns status="unavailable"
     class _FailingClassifier:
         def predict(self, payload):
             raise RuntimeError("model offline")
@@ -133,6 +128,5 @@ def test_run_classifier_analyze_and_summary(tmp_path: Path) -> None:
     assert res_fail["classification"]["status"] == "unavailable"
     assert "model offline" in res_fail["classification"]["error"]
 
-    # Missing file raises FileNotFoundError
     with pytest.raises(FileNotFoundError):
         svc.analyze(tmp_path / "does_not_exist.png")
