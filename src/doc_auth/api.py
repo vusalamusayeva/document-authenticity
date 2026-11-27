@@ -136,35 +136,6 @@ def create_document_router(
 
         return temp_path, total_bytes
 
-    @router.post("/analyze/json", response_model=Dict[str, Any], openapi_extra={
-        "requestBody": {
-            "content": {
-                "application/json": {
-                    "example": {
-                        "document_id": "doc_001",
-                        "file_path": "samples/sample_en.pdf",
-                        "languages": ["eng", "aze"]
-                    }
-                }
-            }
-        }
-    })
-    async def analyze_document_json_endpoint(payload: Dict[str, Any]) -> Dict[str, Any]:
-        file_ref = payload.get("file_path") or payload.get("path")
-        if not file_ref or not isinstance(file_ref, str):
-            raise HTTPException(status_code=422, detail="JSON request requires file_path.")
-        target = Path(file_ref)
-        if not target.exists() or not target.is_file():
-            raise HTTPException(status_code=404, detail="Specified file was not found.")
-        if not hasattr(service, "analyze_summary"):
-            raise HTTPException(status_code=501, detail="JSON file analysis is not supported.")
-        summary = service.analyze_summary(target)
-        if hasattr(summary, "model_dump"):
-            return summary.model_dump()
-        if isinstance(summary, dict):
-            return summary
-        raise HTTPException(status_code=500, detail="Document analysis failed.")
-
     @router.post("/analyze", response_model=DocumentAuthSummary)
     @router.post("/analyze-file", response_model=DocumentAuthSummary, include_in_schema=False)
     async def analyze_document_file_endpoint(file: UploadFile = File(...)) -> DocumentAuthSummary:

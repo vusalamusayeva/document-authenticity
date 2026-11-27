@@ -1,7 +1,8 @@
-﻿from fastapi import FastAPI
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.main import app
+from doc_auth.api import create_document_router
 from doc_auth.deepfake.api import attach_deepfake_router
 
 
@@ -21,3 +22,51 @@ def test_health_and_deepfake_upload_limit() -> None:
         files={"file": ("video.mp4", big_payload, "video/mp4")},
     )
     assert over_resp.status_code == 413
+
+
+def test_analyze_upload_size_empty_and_magic_byte_errors(tmp_path) -> None:
+    import cv2
+    import numpy as np
+
+    client = TestClient(app)
+
+    mini_app = FastAPI()
+    mini_app.include_router(create_document_router(max_upload_bytes=20))
+    mini_client = TestClient(mini_app)
+
+    # 1. Fayl ?l??s? limiti (413)
+    r_413 = mini_client.post(
+        "/v1/analyze",
+        files={"file": ("big.png", b"\x89PNG\r\n\x1a\n" + (b"a" * 50), "image/png")},
+    )
+    assert r_413.status_code == 413
+
+    # 2. Bo? fayl (400)
+    r_empty = mini_client.post(
+        "/v1/analyze",
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+    assert r_empty.status_code == 400
+
+    # 3. Magic byte uzant?ya uy?un deyil (400)
+    r_bad_magic = mini_client.post(
+        "/v1/analyze",
+        files={"file": ("fake.png", b"NOT_A_PNG_HEADER", "image/png")},
+    )
+    assert r_bad_magic.status_code == 400
+
+    # 4. /v1/analyze/json validasiya v? u?urlu ?a??r??
+    r_422 = client.post("/v1/analyze/json", json={})
+    assert r_422.status_code == 422
+
+    r_404 = client.post("/v1/analyze/json", json={"file_path": str(tmp_path / "missing.png")})
+    assert r_404.status_code == 404
+
+    img_file = tmp_path / "json_doc.png"
+    canvas = np.ones((200, 300, 3), dtype=np.uint8) * 255
+    cv2.putText(canvas, "TEST JSON", (40, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (10, 10, 10), 2)
+    cv2.imwrite(str(img_file), canvas)
+
+    r_200 = client.post("/v1/analyze/json", json={"file_path": str(img_file)})
+    assert r_200.status_code == 200
+    assert "checks" in r_200.json()
