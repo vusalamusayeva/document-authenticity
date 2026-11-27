@@ -136,3 +136,68 @@ def test_audio_analyzer_no_audio_and_risk_scoring(
     assert res_risk["duration_diff"] == pytest.approx(3.0)
     assert res_risk["rms_energy"] == pytest.approx(0.0)
     assert res_risk["is_suspicious"] is True
+import json
+import subprocess
+import wave
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from doc_auth.deepfake import audio_analysis as aa_mod
+from doc_auth.deepfake.audio_analysis import AudioLipSyncAnalyzer
+
+
+def test_audio_extract_pcm_rms_failures_and_empty_frames(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    media = tmp_path / "sample.mp4"
+    media.write_bytes(b"dummy-media")
+    analyzer = AudioLipSyncAnalyzer()
+
+    # 1. ffmpeg returns non-zero exit code -> returns None
+    def _ffmpeg_fail(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        out_path = Path(cmd[-1])
+        out_path.write_bytes(b"partial")
+        return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="ffmpeg error")
+
+    monkeypatch.setattr(aa_mod.subprocess, "run", _ffmpeg_fail)
+    assert analyzer._extract_pcm_rms(media) is None
+
+    # 2. ffmpeg creates valid WAV header with 0 frames -> samples.size == 0 -> returns None
+    def _ffmpeg_zero_frames(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        out_path = Path(cmd[-1])
+        with wave.open(str(out_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(b"")
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(aa_mod.subprocess, "run", _ffmpeg_zero_frames)
+    assert analyzer._extract_pcm_rms(media) is None
+
+
+def test_audio_analyze_invalid_video_and_audio_durations(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    media = tmp_path / "bad_dur.mp4"
+    media.write_bytes(b"dummy-media")
+    analyzer = AudioLipSyncAnalyzer()
+
+    probe_payload = {
+        "streams": [
+            {"codec_type": "video", "duration": "not-a-float"},
+            {"codec_type": "audio", "duration": "also-invalid"},
+        ],
+        "format": {"duration": "bad-format-dur"},
+    }
+    monkeypatch.setattr(analyzer, "_probe_streams", lambda _p: probe_payload)
+    monkeypatch.setattr(analyzer, "_extract_pcm_rms", lambda _p: 0.05)
+
+    res = analyzer.analyze(media)
+    assert res["status"] == "success"
+    assert res["has_audio"] is True
+    assert res["video_duration"] is None
+    assert res["audio_duration"] is None
+    assert res["duration_diff"] is None
