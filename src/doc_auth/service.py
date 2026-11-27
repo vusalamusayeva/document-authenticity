@@ -140,7 +140,7 @@ class AnalysisService:
                     return {"status": "success", "predictions": out}
                 except Exception as exc:
                     return {"status": "unavailable", "error": str(exc)}
-        return {"status": "unavailable", "error": "Uy?un klassifikasiya metodu tap?lmad?."}
+        return {"status": "unavailable", "error": "Uyğun klassifikasiya metodu tapılmadı."}
 
     def analyze(self, document_path: str | Path) -> Dict[str, Any]:
         path = Path(document_path)
