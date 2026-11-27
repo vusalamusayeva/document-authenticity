@@ -1,7 +1,9 @@
 import cv2
 import numpy as np
-from .schemas import StampResult
+
 from .exceptions import StampAnalysisError
+from .schemas import StampResult
+
 
 def analyze_stamp(stamp_image: np.ndarray) -> StampResult:
     try:
@@ -50,4 +52,4 @@ def analyze_stamp(stamp_image: np.ndarray) -> StampResult:
         )
 
     except Exception as e:
-        raise StampAnalysisError(f"Mühür analizi xətası: {str(e)}")
+        raise StampAnalysisError(f"Mühür analizi xətası: {e!s}")

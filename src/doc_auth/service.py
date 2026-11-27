@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -49,14 +50,14 @@ class AnalysisService:
 
     def __init__(
         self,
-        loader: Optional[Any] = None,
-        detector: Optional[Any] = None,
-        metadata_analyzer: Optional[Any] = None,
-        ocr_checker: Optional[Any] = None,
-        classifier: Optional[Any] = None,
-        tampering_detector: Optional[Any] = None,
-        decision_model: Optional[Any] = None,
-        explainer: Optional[Any] = None,
+        loader: Any | None = None,
+        detector: Any | None = None,
+        metadata_analyzer: Any | None = None,
+        ocr_checker: Any | None = None,
+        classifier: Any | None = None,
+        tampering_detector: Any | None = None,
+        decision_model: Any | None = None,
+        explainer: Any | None = None,
     ) -> None:
         self.loader = loader if loader is not None else DatasetLoader()
         self.detector = detector if detector is not None else DocumentDetector()
@@ -79,9 +80,9 @@ class AnalysisService:
         self.explainer = explainer if explainer is not None else _default_explainer()
 
     @staticmethod
-    def _invoke_module(component: Any, method_candidates: tuple[str, ...], payload: Any) -> Dict[str, Any]:
+    def _invoke_module(component: Any, method_candidates: tuple[str, ...], payload: Any) -> dict[str, Any]:
         for name in method_candidates:
-            fn: Optional[Callable[..., Any]] = getattr(component, name, None)
+            fn: Callable[..., Any] | None = getattr(component, name, None)
             if callable(fn):
                 res = fn(payload)
                 if isinstance(res, dict):
@@ -96,11 +97,11 @@ class AnalysisService:
 
     def _run_classifier(
         self,
-        detected: Dict[str, Any],
-        ocr: Dict[str, Any],
-        ingested: Dict[str, Any] | None = None,
+        detected: dict[str, Any],
+        ocr: dict[str, Any],
+        ingested: dict[str, Any] | None = None,
         document_path: Path | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         payload: Any = None
         for container in (detected, ingested or {}):
             if isinstance(container, dict):
@@ -131,7 +132,7 @@ class AnalysisService:
             }
 
         for name in ("classify", "predict", "predict_proba", "analyze"):
-            fn: Optional[Callable[..., Any]] = getattr(self.classifier, name, None)
+            fn: Callable[..., Any] | None = getattr(self.classifier, name, None)
             if callable(fn):
                 try:
                     out = fn(payload)
@@ -142,7 +143,7 @@ class AnalysisService:
                     return {"status": "unavailable", "error": str(exc)}
         return {"status": "unavailable", "error": "Uyğun klassifikasiya metodu tapılmadı."}
 
-    def analyze(self, document_path: str | Path) -> Dict[str, Any]:
+    def analyze(self, document_path: str | Path) -> dict[str, Any]:
         path = Path(document_path)
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"Sənəd faylı tapılmadı: {path}")
@@ -184,7 +185,7 @@ class AnalysisService:
 
     def analyze_summary(self, document_path: str | Path) -> DocumentAuthSummary:
         raw = self.analyze(document_path)
-        checks: List[ArtifactCheckResult] = []
+        checks: list[ArtifactCheckResult] = []
         for mod_name in ("ingestion", "detection", "metadata", "ocr", "classification", "forensics"):
             mod_res = raw.get(mod_name) if isinstance(raw.get(mod_name), dict) else {}
             sanitized_details = _sanitize_for_json(mod_res)
