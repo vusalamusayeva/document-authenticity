@@ -87,9 +87,15 @@ import pytest
 from doc_auth.deepfake.face_detector import detect_faces
 
 
-def test_detect_faces_returns_empty_when_zero_height_or_width(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    dummy_frame = np.ones((2, 2), dtype=np.uint8)
-    monkeypatch.setattr(dummy_frame, "shape", (0, 2))
+def test_detect_faces_returns_empty_when_zero_height_or_width() -> None:
+    class _ZeroDimFrame(np.ndarray):
+        @property
+        def shape(self) -> tuple[int, int]:
+            return (0, 2)
+
+        @property
+        def size(self) -> int:
+            return 4
+
+    dummy_frame = np.ones((2, 2), dtype=np.uint8).view(_ZeroDimFrame)
     assert detect_faces(dummy_frame) == []
