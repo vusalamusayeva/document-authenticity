@@ -179,7 +179,7 @@ def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch, tmp_path):
     fake_nn = types.ModuleType("torch.nn")
     fake_nn.Module = object  # type: ignore[attr-defined]
     fake_torch.nn = fake_nn  # type: ignore[attr-defined]
-    fake_torch.load = lambda *_a, **_kw: None  # type: ignore[attr-defined]
+    fake_torch.load = lambda *_a, **_kw: {}  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setitem(sys.modules, "torch.nn", fake_nn)
@@ -187,10 +187,12 @@ def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch, tmp_path):
     assert reloaded.nn is fake_nn
 
     try:
-        missing_ckpt = tmp_path / "missing_weights.pt"
-        det = reloaded.VisualDetector(checkpoint_path=str(missing_ckpt))
+        ckpt_file = tmp_path / "weights.pt"
+        ckpt_file.write_bytes(b"checkpoint-bytes")
+        det = reloaded.VisualDetector(checkpoint_path=str(ckpt_file))
+        monkeypatch.setattr(reloaded, "nn", None)
         with pytest.raises(ModelUnavailableError):
-            det.verify_model_weights()
+            det.load_model()
     finally:
         monkeypatch.delitem(sys.modules, "torch", raising=False)
         monkeypatch.delitem(sys.modules, "torch.nn", raising=False)
