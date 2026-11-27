@@ -6,12 +6,20 @@ import pytest
 from doc_auth.deepfake.exceptions import ModelUnavailableError
 from doc_auth.deepfake.visual_detector import VisualDetector
 
-torch = pytest.importorskip("torch")
 
+def test_visual_detector_loads_torch_checkpoint_and_infers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import types
+    import doc_auth.deepfake.visual_detector as vd_mod
 
-def test_visual_detector_loads_torch_checkpoint_and_infers(tmp_path: Path) -> None:
+    fake_nn = types.SimpleNamespace(Module=type("_FakeModule", (), {}))
+    fake_torch = types.SimpleNamespace(load=lambda *a, **kw: {"epoch": 1, "state_dict": {}})
+    monkeypatch.setattr(vd_mod, "nn", fake_nn, raising=False)
+    monkeypatch.setattr(vd_mod, "torch", fake_torch, raising=False)
+
     ckpt_path = tmp_path / "dummy_model.pt"
-    torch.save({"epoch": 1, "state_dict": {}}, ckpt_path)
+    ckpt_path.write_bytes(b"pt-checkpoint")
 
     detector = VisualDetector(checkpoint_path=ckpt_path, threshold=0.5)
     info = detector.load_model()
