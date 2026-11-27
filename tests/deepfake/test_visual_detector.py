@@ -187,7 +187,9 @@ def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch):
     assert reloaded.nn is fake_nn
 
     try:
-        det = reloaded.VisualDetector(checkpoint_path=None)
+        ckpt_file = tmp_path / "dummy_weights.bin"
+        ckpt_file.write_bytes(b"dummy")
+        det = reloaded.VisualDetector(checkpoint_path=str(ckpt_file))
         with pytest.raises(ModelUnavailableError):
             det.verify_model_weights()
     finally:
