@@ -233,8 +233,19 @@ def analyze_signature_stamp(
             errors=errors,
         )
 
-    except SignatureStampError:
-        raise
+    except SignatureStampError as exc:
+        errors.append(str(exc))
+        safe_id = file_id if isinstance(file_id, str) and file_id and ".." not in file_id and "/" not in file_id and "\\" not in file_id else "safe_failed_doc"
+        return SignatureStampResult(
+            file_id=safe_id,
+            status="failed",
+            is_suspicious=True,
+            risk_score=1.0,
+            visualization_path=None,
+            signature_verifications=[],
+            items=[],
+            errors=errors,
+        )
     except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
         errors.append(str(exc))
         return SignatureStampResult(
