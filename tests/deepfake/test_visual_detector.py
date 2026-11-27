@@ -167,7 +167,7 @@ def test_visual_detector_load_model_unsupported_suffix(tmp_path: Path) -> None:
     with pytest.raises(ModelUnavailableError):
         detector.load_model()
 
-def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch):
+def test_visual_detector_nn_and_unavailable_checkpoint(monkeypatch, tmp_path):
     import importlib
     import sys
     import types
