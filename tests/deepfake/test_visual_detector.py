@@ -33,7 +33,10 @@ def test_visual_detector_rejects_unsupported_extension(tmp_path: Path) -> None:
 
     detector = VisualDetector(checkpoint_path=bad_ckpt)
     with pytest.raises(ModelUnavailableError):
-        detector.verify_model_weights()from pathlib import Path
+        detector.verify_model_weights()
+
+
+from pathlib import Path
 import numpy as np
 import pytest
 import torch
